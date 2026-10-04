@@ -18,7 +18,7 @@
  *   node scripts/selftest-config-check.mts
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -26,10 +26,54 @@ import { join } from 'node:path';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // 四个文件都要进快照——少一个就会在注入时 writeFileSync(path, undefined) 直接抛错。
 const FILES = ['src/consts.ts', 'astro.config.mjs', '.github/workflows/deploy.yml', 'package.json'];
+const write = (file: string, text: string) => writeFileSync(join(ROOT, file), text, 'utf8');
+/** 写**绝对路径**（备份文件用）。踩过：把绝对路径传给 write() 会 join(ROOT, abs)
+ *  拼成 `D:\...\blog\D:\...\blog\x` 直接 ENOENT，于是"崩溃备份"这一步自己先崩。 */
+const writeAbs = (abs: string, text: string) => writeFileSync(abs, text, 'utf8');
+
+/**
+ * 崩溃保险：本脚本会**真的改写你的配置文件**，靠 finally 恢复。
+ * 但如果进程被强杀（Ctrl-C、超时、CI 取消），finally 不会执行，仓库就会留下
+ * 测试值——这个坑真实发生过：一次崩溃把 `user: 'ISNALS'` 改成了 `user: 'testuser'`，
+ * 而我没细看就把它提交了上去。
+ * 所以改动前先把原文件备份到 .selftest-backup/，下次启动时若备份还在就自动还原。
+ * 备份目录在 .gitignore 里，不会进版本库。
+ */
+const BACKUP = join(ROOT, '.selftest-backup');
+const backupPath = (file: string) => join(BACKUP, file.replace(/[\\/]/g, '__'));
+
+const recoverIfCrashed = () => {
+  if (!existsSync(BACKUP)) return false;
+  let recovered = 0;
+  for (const file of FILES) {
+    const b = backupPath(file);
+    if (existsSync(b)) {
+      write(file, readFileSync(b, 'utf8')); // 还原到仓库内相对路径
+      recovered += 1;
+    }
+  }
+  rmSync(BACKUP, { recursive: true, force: true });
+  if (recovered > 0) {
+    console.log(
+      `  ⚠ 检测到上一次自测未正常结束，已从备份还原 ${recovered} 个配置文件` +
+        `（说明进程曾被强杀；本次继续）`,
+    );
+  }
+  return recovered > 0;
+};
+
+const snapshot = () => {
+  rmSync(BACKUP, { recursive: true, force: true });
+  mkdirSync(BACKUP, { recursive: true });
+  for (const file of FILES) writeAbs(backupPath(file), readFileSync(join(ROOT, file), 'utf8'));
+};
+
+recoverIfCrashed();
+snapshot();
+
 const original = new Map(FILES.map((f) => [f, readFileSync(join(ROOT, f), 'utf8')]));
 const hashes = new Map(FILES.map((f) => [f, createHash('sha256').update(original.get(f)!).digest('hex')]));
 
-const write = (file: string, text: string) => writeFileSync(join(ROOT, file), text, 'utf8');
 
 /** 把某一行（按行内 key 定位）替换成新内容；找不到就抛错，避免静默失效 */
 const setLine = (file: string, lineRe: RegExp, replacement: string) => {
@@ -191,8 +235,10 @@ try {
     ok('失败项指名了占位字段', /不是占位值/.test(out), '');
   }
 } finally {
-  // 无论上面怎么炸，都要把仓库恢复原状
+  // 无论上面怎么炸，都要把仓库恢复原状；备份目录也一并清掉（它是崩溃时的退路，
+  // 正常走完就不该留下——留着下次启动会误以为"上次崩了"）
   restore();
+  rmSync(BACKUP, { recursive: true, force: true });
 }
 
 console.log('\n[3] 恢复检查：配置文件必须与开始时逐字节一致');
@@ -201,6 +247,16 @@ for (const [file] of original) {
   const same = now === hashes.get(file);
   ok(`${file} 未被自测改动`, same, same ? '' : '内容已变——自测污染了配置！');
 }
+
+// 兜底断言：万一恢复逻辑本身有洞，也要在**测试值残留**这件事上硬失败，
+// 而不是安静地把它留在工作区等着被误提交（这个坑真实发生过）。
+const leftovers = FILES.filter((f) => readFileSync(join(ROOT, f), 'utf8').includes('testuser'));
+ok(
+  '工作区没有残留测试值 testuser',
+  leftovers.length === 0,
+  leftovers.length > 0 ? `${leftovers.join(', ')} 里还有测试值，请检查恢复逻辑` : '',
+);
+ok('备份目录已清理', !existsSync(BACKUP), '');
 
 console.log(`\n通过 ${pass} 项，失败 ${fails.length} 项`);
 if (fails.length > 0) {
