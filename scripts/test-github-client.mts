@@ -46,6 +46,7 @@ registerHooks({
 type Blob = { content: string; sha: string };
 const store = new Map<string, Blob>();
 const commits: string[] = [];
+const log: string[] = [];
 let shaSeq = 0;
 const nextSha = () => `sha-${++shaSeq}-${Math.random().toString(16).slice(2, 8)}`;
 
@@ -68,6 +69,10 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url ?? '/', 'http://x');
   const p = decodeURIComponent(url.pathname);
   const auth = req.headers.authorization ?? '';
+
+  // 记下每个到达服务器的请求。用途之一：断言"超限图片没有发出任何请求"——
+  // 预检如果只在前端说一句却照样发了请求，那是没拦住。
+  log.push(`${req.method} ${p}`);
 
   // 所有端点都校验 token（真实 GitHub 也是如此，写错 token 会 401）
   if (auth !== `Bearer ${TOKEN}`) return json(res, 401, { message: 'Bad credentials' });
@@ -220,6 +225,26 @@ ok('图片按二进制存储（非 UTF-8 改写）', stored.length === png.lengt
 
 const up2 = await gh.uploadImage(file, TOKEN, undefined, '/blog');
 ok('同名二次上传成功（先探测 sha 再覆盖）', up2.ok, up2.error);
+
+console.log('\n[6b] 体积预检：超限必须在**发请求之前**就拦下');
+// 这是真踩过的坑：用户传了一张 2.27MB 的图，GitHub Contents API 上限 1MB，
+// 返回 422 而且**没有 message**（只有一句 documentation_url），于是面板只显示
+// "上传失败"，看不出是体积问题。现在本地先拦，并说清该怎么办。
+const before = log.length;
+const big = new Uint8Array(2 * 1024 * 1024); // 2MB
+const bigFile = new File([big], 'big.png', { type: 'image/png' });
+const upBig = await gh.uploadImage(bigFile, TOKEN, undefined, '/blog');
+ok('2MB 图片被拒绝', !upBig.ok, `ok=${upBig.ok}`);
+ok('状态码标记为 413（语义上就是"太大"）', upBig.status === 413, `status=${upBig.status}`);
+ok('错误信息说清上限', /1 MB|950 KB/.test(upBig.error ?? ''), upBig.error);
+ok('错误信息给出可行做法', /压|Squoosh|TinyPNG|1600/.test(upBig.error ?? ''), upBig.error);
+ok('没有为超限文件发出任何请求', log.length === before, `新增 ${log.length - before} 条请求`);
+
+// 边界：刚好在限内要放行（不能把正常图片也拦掉）
+const nearLimit = new Uint8Array(900 * 1024);
+const okFile = new File([nearLimit], 'near.png', { type: 'image/png' });
+const upNear = await gh.uploadImage(okFile, TOKEN, undefined, '/blog');
+ok('900KB 图片正常放行（不误伤）', upNear.ok, upNear.error);
 
 console.log('\n[7] 删除');
 const del = await gh.deleteFile('src/content/posts/2026-10-04-test.md', reread.data!.sha, 'delete', TOKEN);

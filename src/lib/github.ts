@@ -75,8 +75,17 @@ async function req<T>(
     const text = await res.text();
     const data = text ? (JSON.parse(text) as T) : undefined;
     if (!res.ok) {
-      const msg = (data as { message?: string } | undefined)?.message ?? `HTTP ${res.status}`;
-      return { ok: false, status: res.status, error: msg, data };
+      // 把状态码与 GitHub 的说明一起带上。踩过的坑：原来只取 `message`，
+      // 而 422（文件过大）这类响应里常常**没有 message**，只有一句 documentation_url，
+      // 于是面板显示一个干巴巴的"上传失败"，看不出是权限、体积还是网络问题。
+      const body = data as { message?: string; errors?: Array<{ message?: string }> } | undefined;
+      const detail = body?.message ?? body?.errors?.[0]?.message ?? text.slice(0, 200).trim();
+      return {
+        ok: false,
+        status: res.status,
+        error: `HTTP ${res.status}${detail ? ` · ${detail}` : ''}`,
+        data,
+      };
     }
     return { ok: true, status: res.status, data };
   } catch (err) {
@@ -179,6 +188,10 @@ const safeImageName = (name: string) => {
   return `${b}.${e}`;
 };
 
+/** GitHub Contents API 的单文件上限是 1 MB（超过要用 Git Data API 分块）。
+ *  这里留一点余量：base64 会把体积放大约 1/3，所以按原始字节数卡在 950KB 更稳。 */
+const SIZE_LIMIT = 950 * 1024;
+
 /** 上传图片：二进制走 base64，路径固定在 public/images 下 */
 export async function uploadImage(
   file: File,
@@ -188,6 +201,21 @@ export async function uploadImage(
    *  在非 Vite 环境（测试脚本）里由调用方传入，避免依赖 import.meta.env。 */
   baseUrl?: string,
 ): Promise<ApiResult<{ path: string; url: string }>> {
+  // 体积预检：超限时 GitHub 会返回 422，而且**不说原因**（只有一句 documentation_url）。
+  // 与其发一个注定失败的 3MB 请求再让用户猜，不如在这里就说清楚该怎么办。
+  if (file.size > SIZE_LIMIT) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    const limit = Math.round(SIZE_LIMIT / 1024);
+    return {
+      ok: false,
+      status: 413,
+      error:
+        `图片 ${mb} MB，超过 GitHub 接口的 ${limit} KB 上限（Contents API 单文件上限 1 MB）。` +
+        `先把图片压小再传：导出时把长边控制在 1600px 左右、或用 TinyPNG / Squoosh 压一下，` +
+        `通常能压到 200–400 KB 而肉眼几乎看不出差别。`,
+    };
+  }
+
   const buf = new Uint8Array(await file.arrayBuffer());
   let bin = '';
   const CHUNK = 0x8000;

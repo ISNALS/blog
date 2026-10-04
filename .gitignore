@@ -28,3 +28,4 @@ preview.png
 
 # 用 git commit -F 传消息时的临时文件（别让它进仓库）
 commit-msg.txt
+*.tmp.txt
