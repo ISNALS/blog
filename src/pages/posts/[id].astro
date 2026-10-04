@@ -11,7 +11,7 @@
  */
 import { getCollection, render } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { SITE, COUNTER } from '../../consts';
+import { SITE } from '../../consts';
 import { fmtDate, readMinutes } from '../../lib/format';
 
 export async function getStaticPaths() {
@@ -21,7 +21,7 @@ export async function getStaticPaths() {
 
 const { post } = Astro.props;
 const { Content, headings } = await render(post);
-const { title, description, pubDate, tags, cover, coverFocus } = post.data;
+const { title, description, pubDate, tags, cover } = post.data;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const minutes = readMinutes(post.body ?? '');
 
@@ -56,24 +56,23 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
         </p>
       )}
 
-      <p class="views-row">
-        阅读
-        <span
-          data-views
-          data-count-read
-          data-slug={post.id}
-          data-endpoint={COUNTER.endpoint}
-          data-namespace={COUNTER.namespace}>····</span>
-      </p>
+      {/*
+        这里原先有一行「阅读 ····」的访问计数。它的初值是四个占位点，
+        在计数接口返回之前一直显示成「阅读 ····」——读起来像一句没写完的话，
+        在标题下面尤其突兀。而"文章热度"本来就在写作面板的「热度」页里看，
+        读者侧不需要这个数字，所以整行去掉。
+        （计数逻辑 src/scripts/views.ts 保留：面板的热度排行仍然用它。）
+      */}
     </header>
 
-    {
-      cover && (
-        <figure class="post-cover" data-img-reveal>
-          <img src={cover} alt="" style={`object-position:${coverFocus}`} decoding="async" />
-        </figure>
-      )
-    }
+    {/*
+      封面**刻意不在文章正文里重复渲染**。
+      封面（frontmatter 的 cover）只有两个用途：列表卡片的缩略图，
+      以及分享卡片的 og:image（见上面 BaseLayout 的 image={cover}）。
+      这里曾经还渲染一张大图，于是当正文里也插了同一张图时，读者会连着看到两张一样的；
+      而正文图片带"从放大+模糊收进清晰"的揭示效果，上面那张没有效果的副本反而显得多余。
+      现在正文里出现什么图，完全由作者在 Markdown 里决定。
+    */}
 
     {
       toc.length > 2 && (
@@ -189,17 +188,6 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
 
   .post-views:empty {
     display: none;
-  }
-
-  .post-cover {
-    margin: 0 0 clamp(2.5rem, 7vw, 5rem);
-    border: 1px solid var(--line);
-    overflow: hidden;
-  }
-  .post-cover img {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
   }
 
   .toc {
