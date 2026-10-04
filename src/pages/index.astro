@@ -55,6 +55,28 @@ const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
     </div>
   </section>
 
+  {/*
+    网络探针：访问人数与访客来自哪些国家。
+    纯前端实现（GitHub Pages 没有服务端，拿不到 IP），细节与取舍见 src/scripts/probe.ts。
+    刻意做成一条细窄的信息条、而不是一块卡片 —— 它是元信息，不该和文章争视觉重量。
+    初始 HTML 里所有数字都是占位符，脚本填充；脚本失败时这里只显示"—"和一行说明，
+    不会留下空框。
+  */}
+  <section class="probe" data-reveal aria-labelledby="probe-title">
+    <p class="probe-head mono">
+      <span class="probe-dot" aria-hidden="true"></span>
+      <span id="probe-title">网络探针</span>
+    </p>
+    <div class="probe-body" data-probe>
+      <p class="probe-total mono">
+        <span data-probe-total>—</span>
+        <span class="probe-unit">次访问</span>
+      </p>
+      <ul class="probe-countries mono" data-probe-countries></ul>
+      <p class="probe-state mono" data-probe-state></p>
+    </div>
+  </section>
+
   <section class="feed" aria-labelledby="feed-title">
     <header class="feed-head">
       <h2 id="feed-title" class="feed-title" data-reveal data-delay-fixed style="--delay:0ms">
@@ -83,6 +105,15 @@ const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
     }
   </section>
 </BaseLayout>
+
+<script>
+  import { initProbe } from '../scripts/probe';
+  // 换页后首页可能被重新挂载，所以和动效引擎一样在 astro:page-load 时再跑一次；
+  // initProbe 用 dataset 做了幂等保护，重复调用安全。
+  const boot = () => initProbe(document);
+  boot();
+  document.addEventListener('astro:page-load', boot);
+</script>
 
 <style>
   .hero {
@@ -140,6 +171,122 @@ const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
     line-height: 1;
     color: var(--ink);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* ── 网络探针 ─────────────────────────────────────────────────────────────
+     刻意做成一条细窄的信息条而非卡片：它是元信息，不该和文章争视觉重量。
+     左侧是标题，右侧是总数 + 各国列表；窄屏折成上下两行。
+     ---------------------------------------------------------------------- */
+  .probe {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.85rem 2rem;
+    align-items: baseline;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 0.95rem 0;
+    margin-bottom: clamp(3rem, 8vw, 6rem);
+    font-size: 0.72rem;
+    line-height: 1.7;
+  }
+  @media (min-width: 48rem) {
+    .probe {
+      grid-template-columns: 11rem minmax(0, 1fr);
+    }
+  }
+
+  .probe-head {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    letter-spacing: 0.1em;
+    color: var(--ink-3);
+  }
+  .probe-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex: none;
+    /* 极慢的呼吸：暗示"在线"，但每秒都在动会变成干扰 */
+    animation: probe-pulse 3.2s var(--ease-out) infinite;
+  }
+  @keyframes probe-pulse {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .probe-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 1.5rem;
+    min-width: 0;
+  }
+
+  .probe-total {
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .probe-total > span:first-child {
+    font-family: var(--serif);
+    font-size: var(--step-1);
+    line-height: 1;
+  }
+  .probe-unit {
+    color: var(--ink-3);
+    font-size: 0.68rem;
+  }
+
+  .probe-countries {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--ink-2);
+    min-width: 0;
+  }
+  .probe-countries li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .probe-flag {
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+  .probe-name {
+    color: var(--ink-2);
+  }
+  .probe-n {
+    color: var(--ink-3);
+  }
+  .probe-n::before {
+    content: '·';
+    margin-right: 0.35rem;
+    color: var(--line-2);
+  }
+
+  .probe-state {
+    margin: 0;
+    color: var(--ink-3);
+    font-size: 0.68rem;
+  }
+  .probe-state:empty {
+    display: none;
   }
 
   .feed-head {

@@ -42,6 +42,26 @@ export const COUNTER = {
   namespace: 'lhx-blog',
 } as const;
 
+/**
+ * 网络探针（首页那个显示访问人数与国家的小面板）。
+ *
+ * 它是纯前端的，因为 GitHub Pages 没有服务端 —— 访客的国家只能靠浏览器
+ * 调一个公共地理定位接口拿到（见 src/scripts/probe.ts 顶部的说明）。
+ *
+ * `knownCountries` 是**手动维护**的已记录国家清单，这是这个方案唯一的硬约束：
+ * Abacus 只能按键读取，没有"列出所有 key"的接口，所以不在这里的国家
+ * 即使有访客也读不出来（但计数仍在累加、不会丢，加进清单就会出现）。
+ * 有新国家时加一行即可。
+ */
+export const PROBE = {
+  /** 访问总数用的 key */
+  totalKey: 'site-visits',
+  /** 国家计数用的 key 前缀，实际键形如 `country-US` */
+  countryPrefix: 'country-',
+  /** 已记录的国家（ISO 3166-1 alpha-2）。按需增删 */
+  knownCountries: ['CN', 'US', 'JP', 'SG', 'DE', 'GB', 'CA', 'AU', 'HK', 'TW'] as string[],
+} as const;
+
 export const NAV = [
   { href: '/', label: '首页' },
   { href: '/archive', label: '归档' },

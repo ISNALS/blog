@@ -16,7 +16,8 @@
     "selftest:config": "node scripts/selftest-config-check.mts",
     "test": "node scripts/test-post-format.mts && node scripts/test-github-client.mts && node scripts/test-find-chrome.mjs && npm run selftest:config",
     "test:nav": "node scripts/test-nav-with-server.mjs",
-    "verify": "npm run check && npm test && npm run build && npm run check:links && npm run test:nav",
+    "test:probe": "node scripts/test-probe-with-server.mjs",
+    "verify": "npm run check && npm test && npm run build && npm run check:links && npm run test:nav && npm run test:probe",
     "predeploy": "npm run verify && npm run check:config",
     "astro": "astro"
   },
