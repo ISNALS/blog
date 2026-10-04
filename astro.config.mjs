@@ -7,9 +7,11 @@ import react from '@astrojs/react';
 // 站点地址：
 //   - 用户主页仓库（<user>.github.io）→ SITE 与 BASE 都用根
 //   - 项目仓库（<user>/blog）        → SITE 是 https://<user>.github.io，BASE 是 /blog
-// 这里先按项目仓库写好占位，你 push 前把 LHX 换成你的 GitHub 用户名即可
-// （`src/consts.ts` 里同一份信息，Admin 面板也读它）。
-export const SITE = 'https://LHX.github.io';
+// 本仓库是项目仓库 ISNALS/blog，所以 BASE = /blog。
+// 域名必须小写：GitHub Pages 的域名会把用户名小写化（ISNALS → isnals）。
+// `src/consts.ts` 的 SITE.url 是同一份信息（= SITE + BASE），Admin 面板也读它；
+// 两处不一致会被 `npm run check:config` 拦下。
+export const SITE = 'https://isnals.github.io';
 export const BASE = '/blog';
 
 export default defineConfig({

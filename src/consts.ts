@@ -13,17 +13,19 @@ export const SITE = {
   author: '陈晨',
   /** 描述（SEO / OG） */
   description: '一个写代码与影像的地方。文章、笔记、以及做过的东西。',
-  /** 站点根地址：与 astro.config.mjs 的 site + base 拼出来的完整前缀一致 */
-  url: 'https://LHX.github.io/blog',
+  /** 站点根地址：与 astro.config.mjs 的 site + base 拼出来的完整前缀一致。
+   *  注意域名用**小写**：GitHub 会把用户名小写化用于 Pages 域名，
+   *  而 canonical / OG / RSS 里的绝对地址对大小写敏感，写错会指向不存在的地址。 */
+  url: 'https://isnals.github.io/blog',
   locale: 'zh-CN',
   /** 首页每页文章数 */
   pageSize: 6,
 } as const;
 
 export const GITHUB = {
-  /** ← 换成你的 GitHub 用户名 */
-  user: 'LHX',
-  /** ← 换成你的仓库名 */
+  /** GitHub 用户名。填写时保持**大小写与账号一致**（API 路径用它，Pages 域名会小写化） */
+  user: 'ISNALS',
+  /** 仓库名 */
   repo: 'blog',
   /** 发布分支 */
   branch: 'main',
