@@ -9,8 +9,8 @@ export const SITE = {
   title: '壹个地方',
   /** 副标题：一句话说清这个博客是什么 */
   tagline: '写代码、写片子，偶尔写人。',
-  /** 作者名 */
-  author: '陈晨',
+  /** 作者名（页脚版权、关于页、以及 description 里的自我介绍都用它） */
+  author: '八尺雪',
   /** 描述（SEO / OG） */
   description: '一个写代码与影像的地方。文章、笔记、以及做过的东西。',
   /** 站点根地址：与 astro.config.mjs 的 site + base 拼出来的完整前缀一致。
