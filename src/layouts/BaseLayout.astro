@@ -19,9 +19,24 @@ interface Props {
   image?: string;
   /** 首页不需要页头大留白，文章页需要 */
   compact?: boolean;
+  /**
+   * 是否允许搜索引擎收录。默认允许。
+   *
+   * 用途是给 `/admin` 这类"只给自己用的页面"关掉索引。要注意它**不是访问控制**：
+   * 面板的安全性来自 GitHub 的 token 校验（没 token 写不进去 401），
+   * noindex 只是不让它出现在搜索结果里——搜到一个 token 输入框本身就很怪。
+   */
+  indexable?: boolean;
 }
 
-const { title, description = SITE.description, type = 'website', image, compact = false } = Astro.props;
+const {
+  title,
+  description = SITE.description,
+  type = 'website',
+  image,
+  compact = false,
+  indexable = true,
+} = Astro.props;
 const pageTitle = title ? `${title} — ${SITE.title}` : `${SITE.title} · ${SITE.tagline}`;
 const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
@@ -45,6 +60,8 @@ const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     <meta name="description" content={description} />
+    {/* 不给索引的页面（后台）明确声明；同时关掉 follow，避免顺着链接爬到别处 */}
+    {!indexable && <meta name="robots" content="noindex, nofollow" />}
     <link rel="canonical" href={canonical} />
     <meta name="theme-color" content="#0b0b0c" />
     <meta property="og:type" content={type} />

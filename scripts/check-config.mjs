@@ -170,6 +170,31 @@ if (typeof enginesField !== 'string' || typeof wfNode !== 'string') {
   fails.push('Node 版本断言拿到了非字符串（配置结构可能变了）');
 }
 
+console.log('\n[7] 后台面板不该被搜索引擎收录');
+// 这不是访问控制（能否发文由 GitHub 的 token 决定），而是"别让人搜到一个 token 输入框"。
+// 放在这里是因为它属于"部署配置"：noindex 在页面里、sitemap 排除在 astro.config 里，
+// 两处都可能被无意改掉，而且改坏了完全看不出来。
+if (!existsSync(join(ROOT, 'dist'))) {
+  warn('dist/ 不存在，跳过收录检查', '先跑 npm run build');
+} else {
+  const adminHtml = read('dist/admin/index.html');
+  ok(
+    'admin 页面带 noindex',
+    /<meta[^>]+name="robots"[^>]+noindex/i.test(adminHtml),
+    '缺 <meta name="robots" content="noindex…">',
+  );
+  const sitemap = read('dist/sitemap-0.xml');
+  ok('admin 不在 sitemap 里', !/\/admin\/?</.test(sitemap), 'sitemap 仍在主动推荐 /admin');
+  // 反向断言：别把 noindex 撒到正常页面上（那是另一种事故：整站不被收录）
+  const normalPages = ['dist/index.html', 'dist/about/index.html', 'dist/archive/index.html'];
+  const polluted = normalPages.filter((p) => /noindex/i.test(read(p)));
+  ok(
+    '正常页面没有误带 noindex',
+    polluted.length === 0,
+    polluted.length > 0 ? `${polluted.join(', ')} 被误标为不收录` : '',
+  );
+}
+
 console.log(`\n通过 ${pass} 项，失败 ${fails.length} 项，警告 ${warnings.length} 项`);
 if (warnings.length > 0) {
   console.log('警告（不阻断构建，但部署前应处理）：\n  - ' + warnings.join('\n  - '));

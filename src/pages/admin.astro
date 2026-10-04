@@ -5,11 +5,21 @@
  * client:only="react" 是刻意的：面板依赖 localStorage 与 GitHub API，
  * 服务端渲染没有意义；而且它不该出现在任何人的静态产物里（爬虫也抓不到内容）。
  * 因此这个页面在构建产物里只有一段加载壳。
+ *
+ * indexable={false}：这是一个只给自己用的页面，不该进搜索引擎。
+ * 注意它**不是访问控制**——能不能发文由 GitHub 的 token 决定（没有写权限的
+ * token 会被 API 拒绝 401），noindex 只解决"搜到一个 token 输入框"这件事。
+ * 同时它也从 sitemap 里排除了（见 astro.config.mjs 的 filter）。
  */
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Admin from '../components/Admin.tsx';
 ---
 
-<BaseLayout title="写文章" description="发布、编辑、删除文章，上传图片，查看热度。" compact>
+<BaseLayout
+  title="写文章"
+  description="发布、编辑、删除文章，上传图片，查看热度。"
+  compact
+  indexable={false}
+>
   <Admin client:only="react" />
 </BaseLayout>

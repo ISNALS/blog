@@ -18,7 +18,17 @@ export default defineConfig({
   site: SITE,
   base: BASE,
   trailingSlash: 'ignore',
-  integrations: [sitemap(), react()],
+  integrations: [
+    sitemap({
+      // 站点地图是"主动向搜索引擎推荐收录哪些页面"，而 /admin 是只给自己用的
+      // 写作面板。它已经在页面上带了 noindex（见 src/pages/admin.astro），
+      // 这里再把 sitemap 里的那条去掉——两处都做是因为它们管的是不同的事：
+      // noindex 管"抓到了也别收录"，filter 管"别主动推荐"。
+      // 只做一处会留下"地图里有、页面说别收录"的矛盾状态。
+      filter: (page) => !/\/admin\/?$/.test(page),
+    }),
+    react(),
+  ],
   markdown: {
     // 代码高亮：Shiki，双主题（浅/深各一套，由 CSS 变量切换）
     shikiConfig: {
