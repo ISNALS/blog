@@ -3,12 +3,17 @@
  *
  * 为什么值得：一个只会在正确配置下输出 OK 的检查器毫无价值。
  * 做法是——
- *   1. 先把仓库临时改成"已填好部署坐标"的状态，确认基线通过
- *   2. 在这个基线上逐条注入真实失误（漏同步、base 写错、分支不符），确认每条都被拦下
+ *   1. 临时把配置置换成**已知良好的一组坐标**（无论仓库当前是占位还是已填真实值，
+ *      都先归一化到这个已知状态），确认基线通过
+ *   2. 在这个基线上逐条注入真实失误（漏同步、base 写错、分支不符、Node 版本不符），
+ *      确认每条都被拦下
  *   3. 无论成功失败，都把文件恢复原状，并用哈希校验证明没有留下改动
  *
- * 直接拿仓库现在的占位配置跑会失败（那是**故意**的：占位坐标必须硬拦），
- * 所以第 1 步的"伪造成已填好"不是取巧，而是让自测能在一个已知良好的起点上验检出能力。
+ * **踩过的坑（务必看）**：第一版是"把 `user: 'LHX'` 换成真名"来伪造基线的，
+ * 于是仓库一旦填入真实坐标，锚点就消失、脚本直接抛错——而更糟的是我当时
+ * 用 `npm run verify; ...; Remove-Item` 复核，`$LASTEXITCODE` 被后面的
+ * Remove-Item 覆盖成 0，导致我误报"全绿"，直到 CI 挂了才发现。
+ * 所以现在**按行替换**（靠 key 定位，不靠 value 字面量），与当前取值无关。
  *
  *   node scripts/selftest-config-check.mts
  */
@@ -19,35 +24,53 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-// 三个文件都要进快照——少一个就会在注入时 writeFileSync(path, undefined) 直接抛错。
-// （自测脚本自己踩过：原来只装了 2 个文件，注入工作流那一步崩了，
-//   而前面几条因为"找不到锚点就提前 return"被误报成失败。）
+// 四个文件都要进快照——少一个就会在注入时 writeFileSync(path, undefined) 直接抛错。
 const FILES = ['src/consts.ts', 'astro.config.mjs', '.github/workflows/deploy.yml', 'package.json'];
 const original = new Map(FILES.map((f) => [f, readFileSync(join(ROOT, f), 'utf8')]));
 const hashes = new Map(FILES.map((f) => [f, createHash('sha256').update(original.get(f)!).digest('hex')]));
 
-/** 把占位坐标伪造成一个"已填好"的站点，用于建立基线 */
-const FILLED_IN: Record<string, [string, string][]> = {
-  'src/consts.ts': [
-    ["user: 'LHX'", "user: 'chenchen'"],
-    ["url: 'https://LHX.github.io/blog'", "url: 'https://chenchen.github.io/blog'"],
-  ],
-  'astro.config.mjs': [
-    ["export const SITE = 'https://LHX.github.io'", "export const SITE = 'https://chenchen.github.io'"],
-  ],
-};
-
 const write = (file: string, text: string) => writeFileSync(join(ROOT, file), text, 'utf8');
 
-const applyFilledIn = () => {
-  for (const [file, pairs] of Object.entries(FILLED_IN)) {
-    let text = original.get(file)!;
-    for (const [from, to] of pairs) {
-      if (!text.includes(from)) throw new Error(`自测脚本需要更新：${file} 里找不到锚点 "${from}"`);
-      text = text.replace(from, to);
-    }
-    write(file, text);
-  }
+/** 把某一行（按行内 key 定位）替换成新内容；找不到就抛错，避免静默失效 */
+const setLine = (file: string, lineRe: RegExp, replacement: string) => {
+  const text = readFileSync(join(ROOT, file), 'utf8');
+  let hit = false;
+  const out = text
+    .split('\n')
+    .map((line) => {
+      if (lineRe.test(line)) {
+        hit = true;
+        const indent = /^\s*/.exec(line)![0]; // 保留原缩进
+        return indent + replacement;
+      }
+      return line;
+    })
+    .join('\n');
+  if (!hit) throw new Error(`自测脚本需要更新：${file} 里找不到匹配 ${lineRe} 的行`);
+  write(file, out);
+};
+
+/** 归一化到"一组已知良好的坐标"——与仓库当前取值无关 */
+const GOOD = {
+  user: 'testuser',
+  repo: 'blog',
+  site: 'https://testuser.github.io',
+  url: 'https://testuser.github.io/blog',
+  base: '/blog',
+  branch: 'main',
+  engine: '>=23.6',
+  wfNode: "'>=23.6'",
+};
+
+const applyGood = () => {
+  setLine('src/consts.ts', /^\s*user:\s*'/, `user: '${GOOD.user}',`);
+  setLine('src/consts.ts', /^\s*repo:\s*'/, `repo: '${GOOD.repo}',`);
+  setLine('src/consts.ts', /^\s*url:\s*'/, `url: '${GOOD.url}',`);
+  setLine('astro.config.mjs', /^\s*export const SITE\s*=/, `export const SITE = '${GOOD.site}';`);
+  setLine('astro.config.mjs', /^\s*export const BASE\s*=/, `export const BASE = '${GOOD.base}';`);
+  setLine('.github/workflows/deploy.yml', /^\s*branches:\s*\[/, `branches: [${GOOD.branch}]`);
+  setLine('.github/workflows/deploy.yml', /^\s*node-version:/, `node-version: ${GOOD.wfNode}`);
+  setLine('package.json', /"node":\s*">=/, `"node": "${GOOD.engine}"`);
 };
 
 const restore = () => {
@@ -81,97 +104,90 @@ const ok = (name: string, cond: boolean, detail = '') => {
 };
 
 try {
-  console.log('\n[0] 基线：把占位坐标填成实际值后，预检应当通过');
-  applyFilledIn();
+  console.log('\n[0] 基线：把坐标归一化到一组已知良好值后，预检应当通过');
+  applyGood();
   {
     const { code, out } = runCheck();
     ok(
-      '已填好的配置下预检通过（exit 0）',
+      '已知良好的配置下预检通过（exit 0）',
       code === 0,
-      code === 0 ? '' : out.split('\n').filter((l) => l.includes('FAIL')).map((l) => l.trim()).join(' / '),
+      code === 0
+        ? ''
+        : out
+            .split('\n')
+            .filter((l) => l.includes('FAIL'))
+            .map((l) => l.trim())
+            .join(' / '),
     );
   }
 
   console.log('\n[1] 在当前基线上注入真实会犯的失误，每一条都必须被拦下');
-  const inject = (name: string, file: string, from: string, to: string, expectIn: RegExp) => {
-    const base = readFileSync(join(ROOT, file), 'utf8');
-    if (!base.includes(from)) {
-      ok(`${name}（自测锚点存在）`, false, `在 ${file} 里找不到 "${from}"`);
-      return;
-    }
-    write(file, base.replace(from, to));
+  const inject = (name: string, mutate: () => void, expectIn: RegExp) => {
+    applyGood(); // 每轮都从干净基线开始
+    mutate();
     const { code, out } = runCheck();
-    // 恢复成"已填好"的基线，供下一条继续注入
-    applyFilledIn();
     ok(name, code !== 0 && expectIn.test(out), `exit=${code}，期望匹配 ${expectIn}`);
   };
 
-  // 注意选场景要准：改 `user` 只影响面板提交目标与页脚链接，
-  // **不影响站点 URL**，所以预检不拦它是对的（第一版自测在这里设计错了场景，
-  // 把一个本来无害的改动当成必须拦截的失误）。真正该拦的是"站点地址不同步"。
+  // 注意选场景要准：改 user 只影响面板提交目标与页脚链接，
+  // **不影响站点 URL**，所以预检不拦它是对的。真正该拦的是"站点地址不同步"。
   inject(
     '把站点地址改成自定义域名，但只改了 consts 没同步 astro.config',
-    'src/consts.ts',
-    "url: 'https://chenchen.github.io/blog'",
-    "url: 'https://blog.example.com/blog'",
+    () => setLine('src/consts.ts', /^\s*url:\s*'/, `url: 'https://blog.example.com/blog',`),
     /url = astro 的 site \+ base/,
   );
 
   inject(
     '把项目仓库名改了，但没同步 base',
-    'src/consts.ts',
-    "repo: 'blog'",
-    "repo: 'my-blog'",
+    () => setLine('src/consts.ts', /^\s*repo:\s*'/, `repo: 'my-blog',`),
     /base 与仓库类型匹配|url 的路径前缀与仓库名推出的 base 一致/,
   );
 
   inject(
     '项目仓库却把 base 留空（部署后所有资源 404）',
-    'astro.config.mjs',
-    "export const BASE = '/blog'",
-    "export const BASE = ''",
+    () => setLine('astro.config.mjs', /^\s*export const BASE\s*=/, `export const BASE = '';`),
     /url = astro 的 site \+ base|url 的路径前缀与仓库名推出的 base 一致/,
   );
 
   inject(
     '把 base 改成与仓库名不符的值',
-    'astro.config.mjs',
-    "export const BASE = '/blog'",
-    "export const BASE = '/my-site'",
+    () => setLine('astro.config.mjs', /^\s*export const BASE\s*=/, `export const BASE = '/my-site';`),
     /base 与仓库类型匹配|url 的路径前缀与仓库名推出的 base 一致/,
   );
 
   inject(
     '两处站点域名不一致',
-    'astro.config.mjs',
-    "export const SITE = 'https://chenchen.github.io'",
-    "export const SITE = 'https://wrong.example.com'",
+    () =>
+      setLine('astro.config.mjs', /^\s*export const SITE\s*=/, `export const SITE = 'https://wrong.example.com';`),
     /url = astro 的 site \+ base|url 的路径前缀/,
   );
 
   inject(
     '工作流触发分支与配置不一致（push 后 Actions 不触发）',
-    '.github/workflows/deploy.yml',
-    'branches: [main]',
-    'branches: [master]',
+    () => setLine('.github/workflows/deploy.yml', /^\s*branches:\s*\[/, `branches: [master]`),
     /trigger 分支与 consts 的 branch 一致/,
   );
 
-  // "只在 CI 挂"的经典来源：engines 声明 Node 22，而 *.mts 测试依赖 24 才默认开启的类型剥离。
-  // 本地是 24 所以全绿，推上去 CI 立刻报 Unknown file extension .ts。
+  // "只在 CI 挂"的经典来源：engines 声明 Node 22，而 *.mts 测试依赖 23.6 才默认开启的类型剥离。
   inject(
-    'engines 声明了低于 CI 要求的 Node 版本',
-    'package.json',
-    '"node": ">=23.6"',
-    '"node": ">=22.0"',
-    /engines 与 workflow 声明同一个版本|声明版本不低于/,
+    'engines 声明了低于要求的 Node 版本',
+    () => setLine('package.json', /"node":\s*">=/, `"node": ">=22.0"`),
+    /声明版本不低于|engines 与 workflow/,
+  );
+
+  inject(
+    'CI 的 node-version 与 engines 不一致',
+    () => setLine('.github/workflows/deploy.yml', /^\s*node-version:/, `node-version: '24'`),
+    /engines 与 workflow 声明同一个版本/,
   );
 
   console.log('\n[2] 占位坐标必须被硬拦（不是警告）');
-  restore();
+  // 明确构造"占位值残留"的状态：改回 LHX 再跑，必须失败
+  applyGood();
+  setLine('src/consts.ts', /^\s*user:\s*'/, `user: 'LHX',`);
   {
     const { code, out } = runCheck();
-    ok('仓库当前是占位配置 → 预检失败', code !== 0, `exit=${code}`);
+    ok('占位坐标 → 预检失败', code !== 0, `exit=${code}`);
     ok('失败项指名了占位字段', /不是占位值/.test(out), '');
   }
 } finally {
@@ -180,11 +196,10 @@ try {
 }
 
 console.log('\n[3] 恢复检查：配置文件必须与开始时逐字节一致');
-for (const [file, text] of original) {
+for (const [file] of original) {
   const now = createHash('sha256').update(readFileSync(join(ROOT, file), 'utf8')).digest('hex');
   const same = now === hashes.get(file);
   ok(`${file} 未被自测改动`, same, same ? '' : '内容已变——自测污染了配置！');
-  void text;
 }
 
 console.log(`\n通过 ${pass} 项，失败 ${fails.length} 项`);
