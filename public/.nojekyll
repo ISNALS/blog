@@ -1,0 +1,2 @@
+# 交给 GitHub Pages 的原样静态托管：不要跑 Jekyll 处理
+# （Astro 产物里有 _astro/ 这类下划线开头的目录，Jekyll 默认会忽略它们）

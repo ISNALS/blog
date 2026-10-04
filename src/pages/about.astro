@@ -1,0 +1,97 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { SITE, GITHUB } from '../consts';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<BaseLayout title="关于" description={`关于 ${SITE.author} 与这个博客。`}>
+  <article class="about">
+    <h1 class="about-title" data-split>关于</h1>
+
+    <div class="about-body" data-article-body>
+      <p data-reveal>
+        我是 {SITE.author}。这个站用来放长文章、短笔记，以及做过的东西的来龙去脉。
+        {SITE.tagline}
+      </p>
+
+      <p data-reveal>
+        站点是纯静态的——没有服务器、没有数据库，内容和图片都以文件形式存在
+        <a href={`https://github.com/${GITHUB.user}/${GITHUB.repo}`}>GitHub 仓库</a>里，
+        由 GitHub Pages 托管。写文章在本站的 <a href={`${base}/admin`}>写文章</a> 面板完成：
+        提交即发布，撤稿就是删掉那次提交。
+      </p>
+
+      <h2 data-reveal>这块站是怎么搭的</h2>
+
+      <ul data-reveal>
+        <li>框架：Astro（默认零 JavaScript，文章页只有几 KB 的脚本）</li>
+        <li>动效：Motion + CSS 自定义属性，全站一套缓动令牌</li>
+        <li>内容：Markdown 文件，图片放在仓库的 <code>public/images</code></li>
+        <li>阅读量：Abacus（免费开源计数），同一访客 24 小时只计一次</li>
+        <li>部署：推送到 <code>{GITHUB.branch}</code> 分支，GitHub Actions 自动构建发布</li>
+      </ul>
+
+      <h2 data-reveal>联系</h2>
+      <p data-reveal>
+        想聊的话，去 GitHub 找我：
+        <a href={`https://github.com/${GITHUB.user}`}>@{GITHUB.user}</a>。
+      </p>
+    </div>
+  </article>
+</BaseLayout>
+
+<script>
+  import { hydrateArticle } from '../scripts/motion';
+  const boot = () => hydrateArticle(document);
+  boot();
+  document.addEventListener('astro:page-load', boot);
+</script>
+
+<style>
+  .about {
+    max-width: 48rem;
+  }
+  .about-title {
+    font-size: var(--step-4);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin: 0 0 clamp(2rem, 6vw, 3.5rem);
+  }
+  .about-body {
+    font-size: var(--step-0);
+    line-height: 1.85;
+    display: grid;
+    gap: 1.35em;
+  }
+  .about-body :global(h2) {
+    font-size: var(--step-2);
+    margin: 1.4em 0 0;
+  }
+  .about-body :global(a) {
+    border-bottom: 1px solid var(--accent);
+  }
+  .about-body :global(a:hover) {
+    background: var(--accent-soft);
+  }
+  .about-body :global(code) {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    padding: 0.1em 0.35em;
+  }
+  .about-body :global(ul) {
+    padding-left: 1.25rem;
+    display: grid;
+    gap: 0.5em;
+    margin: 0;
+  }
+  .about-body :global(li::marker) {
+    color: var(--accent);
+  }
+  .about-body :global(p) {
+    margin: 0;
+    color: color-mix(in oklab, var(--ink) 88%, var(--ink-2));
+  }
+</style>

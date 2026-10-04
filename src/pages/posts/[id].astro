@@ -1,0 +1,398 @@
+---
+/**
+ * 文章页。
+ *
+ * 过渡设计的三个层次（这是"文章内文字之间"那条需求的落点）：
+ *  1. 标题：逐字揭示（[data-split]），大字逐字浮起最容易读作"排印"而不是"动画"
+ *  2. 正文：每个直接子元素（段落、图、引用、代码块）各自淡入上浮，
+ *     相邻间隔 40ms——读起来是一段接一段浮现，而不是整块弹出来
+ *  3. 图片：滚动进入视口时从 1.08 倍 + 模糊收进清晰
+ * 层与层之间共享同一组缓动令牌，所以三个层次是一句话的三种说法。
+ */
+import { getCollection, render } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { SITE, COUNTER } from '../../consts';
+import { fmtDate, readMinutes } from '../../lib/format';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('posts', ({ data }) => (import.meta.env.PROD ? !data.draft : true));
+  return posts.map((post) => ({ params: { id: post.id }, props: { post } }));
+}
+
+const { post } = Astro.props;
+const { Content, headings } = await render(post);
+const { title, description, pubDate, tags, cover, coverFocus } = post.data;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const minutes = readMinutes(post.body ?? '');
+
+// 上下文：同标签的其它文章（用标签而不是时间，读起来更像"同一话题的延伸"）
+const all = await getCollection('posts', ({ data }) => (import.meta.env.PROD ? !data.draft : true));
+const related = all
+  .filter((p) => p.id !== post.id && p.data.tags.some((t) => tags.includes(t)))
+  .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf())
+  .slice(0, 3);
+
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+<BaseLayout title={title} description={description || SITE.description} type="article" image={cover}>
+  <div class="progress" aria-hidden="true"></div>
+
+  <article class="post">
+    <header class="post-head">
+      <div class="meta mono" data-reveal data-delay-fixed style="--delay:40ms">
+        <time datetime={pubDate.toISOString()}>{fmtDate(pubDate)}</time>
+        <span aria-hidden="true">/</span>
+        <span>{minutes} 分钟</span>
+        {tags.length > 0 && <span aria-hidden="true">/</span>}
+        {tags.map((t) => <a class="tag" href={`${base}/archive#tag-${encodeURIComponent(t)}`}>{t}</a>)}
+      </div>
+
+      <h1 class="post-title" data-split>{title}</h1>
+
+      {description && (
+        <p class="post-lead" data-reveal style="--rise:26px" data-delay-fixed>
+          {description}
+        </p>
+      )}
+
+      <p class="views-row">
+        阅读
+        <span
+          data-views
+          data-count-read
+          data-slug={post.id}
+          data-endpoint={COUNTER.endpoint}
+          data-namespace={COUNTER.namespace}>····</span>
+      </p>
+    </header>
+
+    {
+      cover && (
+        <figure class="post-cover" data-img-reveal>
+          <img src={cover} alt="" style={`object-position:${coverFocus}`} decoding="async" />
+        </figure>
+      )
+    }
+
+    {
+      toc.length > 2 && (
+        <nav class="toc" aria-label="本文目录" data-reveal>
+          <p class="mono toc-title">目录</p>
+          <ol>
+            {toc.map((h) => (
+              <li class:list={[`d-${h.depth}`]}>
+                <a href={`#${h.slug}`}>{h.text}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )
+    }
+
+    <div class="prose" data-article-body>
+      <Content />
+    </div>
+
+    <footer class="post-foot">
+      <div class="post-rule" aria-hidden="true"></div>
+      <p class="mono">
+        写于 {fmtDate(pubDate)} · 全文 {minutes} 分钟 · 文中图片均由作者拍摄或截图
+      </p>
+    </footer>
+  </article>
+
+  {
+    related.length > 0 && (
+      <section class="related" aria-labelledby="rel-title">
+        <h2 id="rel-title" class="related-title" data-reveal>
+          接着看
+        </h2>
+        <ul class="related-list" data-group>
+          {related.map((p) => (
+            <li>
+              <a href={`${base}/posts/${p.id}/`}>
+                <span class="rel-date mono">{fmtDate(p.data.pubDate, 'short')}</span>
+                <span class="rel-name">{p.data.title}</span>
+                <span class="rel-arrow" aria-hidden="true">→</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+</BaseLayout>
+
+<script>
+  import { hydrateArticle } from '../../scripts/motion';
+
+  // 正文段落逐段揭示（读起来像一句接一句浮上来），换页后重新执行
+  const boot = () => hydrateArticle(document);
+  boot();
+  document.addEventListener('astro:page-load', boot);
+</script>
+
+<style>
+  .progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 2px;
+    width: 0;
+    background: var(--accent);
+    z-index: 60;
+  }
+
+  .post {
+    max-width: 54rem;
+    margin-inline: auto;
+  }
+
+  .post-head {
+    margin-bottom: clamp(2rem, 6vw, 4rem);
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: clamp(1.2rem, 3vw, 2rem);
+    color: var(--ink-3);
+  }
+  .meta .tag {
+    border-bottom: 1px solid var(--line-2);
+    transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+  }
+  .meta .tag:hover {
+    color: var(--ink);
+    border-color: var(--ink);
+  }
+
+  .post-title {
+    font-size: var(--step-3);
+    line-height: 1.06;
+    letter-spacing: -0.025em;
+    margin: 0 0 clamp(1.2rem, 3vw, 2rem);
+    word-break: keep-all;
+  }
+
+  .post-lead {
+    font-family: var(--serif);
+    font-size: var(--step-1);
+    line-height: 1.6;
+    color: var(--ink-2);
+    margin: 0 0 1.2rem;
+    max-width: 46ch;
+  }
+
+  .post-views:empty {
+    display: none;
+  }
+
+  .post-cover {
+    margin: 0 0 clamp(2.5rem, 7vw, 5rem);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .post-cover img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+  }
+
+  .toc {
+    border: 1px solid var(--line);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: clamp(2rem, 5vw, 3rem);
+  }
+  .toc-title {
+    margin: 0 0 0.8rem;
+  }
+  .toc ol {
+    margin: 0;
+    padding-left: 1.1rem;
+    display: grid;
+    gap: 0.35rem;
+  }
+  .toc .d-3 {
+    margin-left: 1rem;
+    list-style: circle;
+  }
+  .toc a {
+    color: var(--ink-2);
+    transition: color var(--dur-1) var(--ease-out);
+  }
+  .toc a:hover {
+    color: var(--ink);
+  }
+
+  .post-foot {
+    margin-top: clamp(3rem, 8vw, 5rem);
+  }
+  .post-rule {
+    height: 1px;
+    background: var(--line);
+    margin-bottom: 1.2rem;
+  }
+
+  .related {
+    max-width: 54rem;
+    margin: clamp(4rem, 10vw, 7rem) auto 0;
+  }
+  .related-title {
+    font-size: var(--step-2);
+    margin: 0 0 1.5rem;
+  }
+  .related-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+  }
+  .related-list li {
+    border-bottom: 1px solid var(--line);
+  }
+  .related-list a {
+    display: grid;
+    grid-template-columns: 5rem 1fr auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.1rem 0;
+    transition: padding-left var(--dur-2) var(--ease-out);
+  }
+  .related-list a:hover {
+    padding-left: 0.75rem;
+  }
+  .rel-date {
+    color: var(--ink-3);
+  }
+  .rel-name {
+    font-family: var(--serif);
+    font-size: var(--step-1);
+    transition: color var(--dur-1) var(--ease-out);
+  }
+  .rel-arrow {
+    color: var(--accent);
+    transition: transform var(--dur-2) var(--ease-out);
+  }
+  .related-list a:hover .rel-arrow {
+    transform: translateX(6px);
+  }
+
+  /* ── 正文排印 ─────────────────────────────────────────────────────────── */
+  .prose {
+    font-size: var(--step-0);
+    line-height: 1.85;
+  }
+  .prose :global(> * + *) {
+    margin-top: 1.35em;
+  }
+  .prose :global(p) {
+    margin: 0;
+    color: color-mix(in oklab, var(--ink) 88%, var(--ink-2));
+  }
+  .prose :global(h2) {
+    font-size: var(--step-2);
+    margin-top: 2.4em;
+    scroll-margin-top: 6rem;
+  }
+  .prose :global(h3) {
+    font-size: var(--step-1);
+    margin-top: 2em;
+    scroll-margin-top: 6rem;
+  }
+  .prose :global(a) {
+    color: var(--ink);
+    border-bottom: 1px solid var(--accent);
+    transition: background-color var(--dur-1) var(--ease-out);
+  }
+  .prose :global(a:hover) {
+    background: var(--accent-soft);
+  }
+  .prose :global(strong) {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .prose :global(blockquote) {
+    margin-inline: 0;
+    padding-left: 1.25rem;
+    border-left: 2px solid var(--accent);
+    color: var(--ink-2);
+    font-family: var(--serif);
+    font-size: var(--step-1);
+    line-height: 1.6;
+  }
+  .prose :global(ul),
+  .prose :global(ol) {
+    padding-left: 1.3rem;
+    display: grid;
+    gap: 0.45em;
+  }
+  .prose :global(li::marker) {
+    color: var(--accent);
+  }
+  .prose :global(img) {
+    width: 100%;
+    border: 1px solid var(--line);
+  }
+  /* 正文里的图也走"放大+模糊收进清晰" */
+  .prose :global(p > img) {
+    aspect-ratio: auto;
+  }
+  .prose :global(figure) {
+    margin: 2em 0;
+  }
+  .prose :global(figcaption) {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    margin-top: 0.6rem;
+  }
+  .prose :global(hr) {
+    border: 0;
+    height: 1px;
+    background: var(--line);
+    margin: 3em 0;
+  }
+  .prose :global(code) {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    padding: 0.1em 0.35em;
+  }
+  .prose :global(pre) {
+    background: var(--bg-soft) !important;
+    border: 1px solid var(--line);
+    padding: 1.1rem 1.25rem;
+    overflow-x: auto;
+    font-size: 0.84rem;
+    line-height: 1.7;
+  }
+  .prose :global(pre code) {
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+  .prose :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+  }
+  .prose :global(th),
+  .prose :global(td) {
+    border-bottom: 1px solid var(--line);
+    padding: 0.6rem 0.5rem;
+    text-align: left;
+  }
+  .prose :global(th) {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+</style>

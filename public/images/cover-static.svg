@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000" role="img" aria-label="静态站封面">
+  <defs>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="34" />
+    </filter>
+    <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M80 0H0V80" fill="none" stroke="#f2f0ec" stroke-opacity="0.07" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#0b0b0c" />
+  <rect width="1600" height="1000" fill="url(#grid)" />
+
+  <!-- 仓库：一摞文件，其中一格被点亮 -->
+  <g>
+    <rect x="180" y="220" width="520" height="120" fill="#121214" stroke="#232326" stroke-width="2" />
+    <rect x="180" y="370" width="520" height="120" fill="#121214" stroke="#232326" stroke-width="2" />
+    <rect x="180" y="520" width="520" height="120" fill="#121214" stroke="#d96f4a" stroke-width="2" />
+    <rect x="180" y="670" width="520" height="120" fill="#121214" stroke="#232326" stroke-width="2" />
+
+    <g fill="#6f6d69">
+      <rect x="214" y="268" width="300" height="10" />
+      <rect x="214" y="292" width="200" height="10" />
+      <rect x="214" y="418" width="260" height="10" />
+      <rect x="214" y="442" width="330" height="10" />
+      <rect x="214" y="718" width="240" height="10" />
+      <rect x="214" y="742" width="310" height="10" />
+    </g>
+    <g fill="#d96f4a">
+      <rect x="214" y="568" width="340" height="12" />
+      <rect x="214" y="596" width="230" height="12" />
+    </g>
+  </g>
+
+  <!-- 提交的箭头：从文件指向远端 -->
+  <g>
+    <path d="M760 580 H980" stroke="#f2f0ec" stroke-opacity="0.45" stroke-width="3" stroke-dasharray="14 12" />
+    <path d="M980 560 L1020 580 L980 600 Z" fill="#f2f0ec" fill-opacity="0.55" />
+  </g>
+
+  <!-- 远端：发布出去的页面 -->
+  <g>
+    <rect x="1060" y="300" width="380" height="500" fill="#121214" stroke="#2f2f33" stroke-width="2" />
+    <rect x="1060" y="300" width="380" height="44" fill="#18181b" />
+    <circle cx="1086" cy="322" r="6" fill="#d96f4a" />
+    <circle cx="1108" cy="322" r="6" fill="#2f2f33" />
+    <g fill="#f2f0ec" fill-opacity="0.7">
+      <rect x="1092" y="384" width="220" height="16" />
+      <rect x="1092" y="416" width="300" height="10" />
+      <rect x="1092" y="438" width="270" height="10" />
+      <rect x="1092" y="490" width="300" height="150" fill="#0b0b0c" stroke="#232326" />
+    </g>
+  </g>
+
+  <circle cx="1250" cy="580" r="230" fill="#d96f4a" opacity="0.10" filter="url(#glow)" />
+</svg>

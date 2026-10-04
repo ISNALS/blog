@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000" role="img" aria-label="中文排印封面">
+  <defs>
+    <pattern id="baseline" width="1600" height="64" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="63" x2="1600" y2="63" stroke="#f2f0ec" stroke-opacity="0.10" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#0b0b0c" />
+  <rect width="1600" height="1000" fill="url(#baseline)" />
+
+  <!-- 超大字号 + 负字距：演示"越大的字，字距越要收" -->
+  <text x="120" y="470" fill="#f2f0ec" font-family="'Source Han Serif SC', 'Noto Serif SC', 'SimSun', serif"
+        font-size="300" letter-spacing="-14" font-weight="600">排印</text>
+
+  <!-- 标点挤压：全角标点只占半格 -->
+  <g>
+    <rect x="120" y="540" width="1360" height="1" fill="#d96f4a" opacity="0.5" />
+    <rect x="120" y="540" width="28" height="14" fill="#d96f4a" />
+    <text x="120" y="600" fill="#6f6d69" font-family="monospace" font-size="24" letter-spacing="3">行高 1.85 · letter-spacing -0.03em · 中西文间距 1/4em</text>
+  </g>
+
+  <!-- 混排演示：中文与拉丁之间的"空白通道"（橙色短杠标出应有的间距） -->
+  <g transform="translate(120 680)">
+    <text x="0" y="0" fill="#a8a6a1" font-family="'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="46">
+      用 GitHub Actions 自动构建
+    </text>
+    <g fill="#d96f4a" opacity="0.85">
+      <rect x="48" y="16" width="12" height="4" />
+      <rect x="300" y="16" width="12" height="4" />
+      <rect x="556" y="16" width="12" height="4" />
+    </g>
+    <text x="0" y="52" fill="#6f6d69" font-family="monospace" font-size="20" letter-spacing="3">混排间距由 CSS 统一给，不在正文里手打空格</text>
+  </g>
+
+  <!-- 右侧：字距与字号的负相关曲线 -->
+  <g transform="translate(1180 200)" stroke="#f2f0ec" stroke-opacity="0.25">
+    <line x1="0" y1="300" x2="240" y2="300" />
+    <line x1="0" y1="300" x2="0" y2="0" />
+  </g>
+  <path d="M1180 480 C 1260 300, 1340 220, 1420 200" fill="none" stroke="#d96f4a" stroke-width="3" />
+  <circle cx="1420" cy="200" r="7" fill="#d96f4a" />
+</svg>

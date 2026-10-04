@@ -1,0 +1,194 @@
+---
+/**
+ * 文章卡片。
+ *
+ * 视觉：先锋刊物的"离格"构图——奇数卡下沉、封面用不等比裁切、元信息竖排在左侧。
+ * 动效：整组由父级 [data-group] 成组入场（不各动各的）；悬停时封面缓慢放大、
+ *       标题上浮、序号由细变亮——三处都在同一组缓动令牌下。
+ */
+import type { CollectionEntry } from 'astro:content';
+import { fmtDate, readMinutes } from '../lib/format';
+
+interface Props {
+  post: CollectionEntry<'posts'>;
+  index: number;
+  /** 大卡：用于置顶与首页头图位 */
+  feature?: boolean;
+  base: string;
+}
+
+const { post, index, feature = false, base } = Astro.props;
+const { title, description, pubDate, tags, cover, coverFocus } = post.data;
+const href = `${base}/posts/${post.id}/`;
+const minutes = readMinutes(post.body ?? '');
+const num = String(index + 1).padStart(2, '0');
+---
+
+<article class:list={['card', feature && 'is-feature']}>
+  <a href={href} class="card-link" aria-label={title}>
+    {
+      cover ? (
+        <div class="card-media" data-img-reveal style={`--focus:${coverFocus}`}>
+          <img src={cover} alt="" loading={feature ? 'eager' : 'lazy'} decoding="async" />
+        </div>
+      ) : (
+        <div class="card-media is-blank" aria-hidden="true">
+          <span class="mono">NO IMAGE</span>
+        </div>
+      )
+    }
+
+    <div class="card-body">
+      <div class="card-meta mono">
+        <span class="num">{num}</span>
+        <time datetime={pubDate.toISOString()}>{fmtDate(pubDate)}</time>
+        <span>{minutes} 分钟</span>
+      </div>
+
+      <h3 class="card-title">{title}</h3>
+      {description && <p class="card-desc">{description}</p>}
+
+      {
+        tags.length > 0 && (
+          <ul class="card-tags" aria-label="标签">
+            {tags.slice(0, 3).map((t) => (
+              <li>{t}</li>
+            ))}
+          </ul>
+        )
+      }
+
+      <span class="card-more" aria-hidden="true">
+        阅读 <span class="arrow">→</span>
+      </span>
+    </div>
+  </a>
+</article>
+
+<style>
+  .card {
+    position: relative;
+  }
+
+  .card-link {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(1rem, 2vw, 1.75rem);
+    align-items: start;
+    outline-offset: 6px;
+  }
+
+  /* 离格：偶数卡整体下沉，破坏栅格的机械感 */
+  @media (min-width: 62rem) {
+    .card {
+      grid-column: span 6;
+    }
+    .card:nth-child(even) {
+      margin-top: clamp(2rem, 7vw, 6rem);
+    }
+    .card.is-feature {
+      grid-column: span 12;
+    }
+    .card.is-feature .card-link {
+      grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+      align-items: end;
+    }
+  }
+
+  .card-media {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    aspect-ratio: 16 / 10;
+  }
+  .card.is-feature .card-media {
+    aspect-ratio: 16 / 9;
+  }
+  .card-media.is-blank {
+    display: grid;
+    place-items: center;
+    background: repeating-linear-gradient(135deg, var(--bg-soft) 0 12px, var(--line) 12px 13px);
+  }
+  .card-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: var(--focus, 50% 50%);
+    /* 悬停放大由父级 hs 驱动，见下 */
+    transition: transform 900ms var(--ease-out), filter 900ms var(--ease-out);
+  }
+  .card:hover .card-media img {
+    transform: scale(1.045);
+    filter: saturate(1.06) contrast(1.02);
+  }
+
+  .card-body {
+    display: grid;
+    gap: 0.7rem;
+    align-content: start;
+  }
+
+  .card-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+  }
+  .card-meta .num {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .card-title {
+    font-size: var(--step-2);
+    line-height: 1.12;
+    transition: transform var(--dur-2) var(--ease-out), color var(--dur-1) var(--ease-out);
+  }
+  .card:hover .card-title {
+    transform: translateY(-3px);
+  }
+
+  .card-desc {
+    color: var(--ink-2);
+    font-size: var(--step-0);
+    margin: 0;
+    max-width: 42ch;
+  }
+
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    list-style: none;
+    margin: 0.2rem 0 0;
+    padding: 0;
+  }
+  .card-tags li {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border: 1px solid var(--line-2);
+    padding: 0.18rem 0.5rem;
+  }
+
+  .card-more {
+    font-size: var(--step--1);
+    color: var(--ink-3);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    transition: color var(--dur-1) var(--ease-out);
+  }
+  .card-more .arrow {
+    display: inline-block;
+    transition: transform var(--dur-2) var(--ease-out);
+  }
+  .card:hover .card-more {
+    color: var(--ink);
+  }
+  .card:hover .card-more .arrow {
+    transform: translateX(5px);
+  }
+</style>

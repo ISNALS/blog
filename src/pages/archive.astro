@@ -1,0 +1,174 @@
+---
+/**
+ * 归档：按年月分组 + 标签速查。
+ * 动效上刻意比首页安静一档——归档是"查阅"场景，逐条错峰 30ms 即可，
+ * 不需要首页那种成组呼吸。
+ */
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { fmtDate, readMinutes } from '../lib/format';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const all = (await getCollection('posts', ({ data }) => (import.meta.env.PROD ? !data.draft : true))).sort(
+  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
+);
+
+const byMonth = new Map<string, typeof all>();
+for (const p of all) {
+  const key = `${p.data.pubDate.getFullYear()}.${String(p.data.pubDate.getMonth() + 1).padStart(2, '0')}`;
+  if (!byMonth.has(key)) byMonth.set(key, []);
+  byMonth.get(key)!.push(p);
+}
+
+const tagCount = new Map<string, number>();
+for (const p of all) for (const t of p.data.tags) tagCount.set(t, (tagCount.get(t) ?? 0) + 1);
+const tags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]);
+---
+
+<BaseLayout title="归档" description="全部文章，按时间与标签浏览。">
+  <header class="arc-head">
+    <h1 class="arc-title" data-split>归档</h1>
+    <p class="arc-sub mono" data-reveal data-delay-fixed style="--delay:120ms">
+      共 {all.length} 篇 · {byMonth.size} 个月 · {tags.length} 个标签
+    </p>
+  </header>
+
+  {
+    tags.length > 0 && (
+      <section class="tags" aria-label="标签" data-reveal>
+        <ul>
+          {tags.map(([t, n]) => (
+            <li id={`tag-${encodeURIComponent(t)}`}>
+              <a href={`${base}/archive#tag-${encodeURIComponent(t)}`}>
+                {t}
+                <span class="tag-n">{n}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  {
+    [...byMonth.entries()].map(([month, posts]) => (
+      <section class="month">
+        <h2 class="month-label mono">{month}</h2>
+        <ol class="month-list">
+          {posts.map((p, i) => (
+            <li data-reveal style={`--delay:${Math.min(i * 35, 280)}ms;--rise:12px`}>
+              <a href={`${base}/posts/${p.id}/`}>
+                <time datetime={p.data.pubDate.toISOString()}>{fmtDate(p.data.pubDate, 'short')}</time>
+                <span class="name">{p.data.title}</span>
+                <span class="minutes mono">{readMinutes(p.body ?? '')}′</span>
+              </a>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))
+  }
+
+  {all.length === 0 && <p class="none" data-reveal>还没有文章。</p>}
+</BaseLayout>
+
+<style>
+  .arc-head {
+    margin-bottom: clamp(2rem, 6vw, 4rem);
+  }
+  .arc-title {
+    font-size: var(--step-4);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin: 0 0 1rem;
+  }
+  .arc-sub {
+    margin: 0;
+  }
+
+  .tags {
+    margin-bottom: clamp(2.5rem, 6vw, 4rem);
+    border-block: 1px solid var(--line);
+    padding-block: 1.25rem;
+  }
+  .tags ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .tags a {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    border: 1px solid var(--line-2);
+    padding: 0.3rem 0.7rem;
+    transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out),
+      transform var(--dur-2) var(--ease-out);
+  }
+  .tags a:hover {
+    color: var(--ink);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .tag-n {
+    color: var(--ink-3);
+  }
+
+  .month {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: clamp(2rem, 5vw, 3.5rem);
+  }
+  .month-label {
+    margin: 0;
+    color: var(--accent);
+  }
+  .month-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+  }
+  .month-list li {
+    border-bottom: 1px solid var(--line);
+  }
+  .month-list a {
+    display: grid;
+    grid-template-columns: 4.5rem 1fr auto;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 1rem 0;
+    transition: padding-left var(--dur-2) var(--ease-out), color var(--dur-1) var(--ease-out);
+  }
+  .month-list a:hover {
+    padding-left: 0.7rem;
+  }
+  .month-list time {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+  }
+  .name {
+    font-family: var(--serif);
+    font-size: var(--step-1);
+    transition: color var(--dur-1) var(--ease-out);
+  }
+  .month-list a:hover .name {
+    color: var(--accent);
+  }
+  .minutes {
+    color: var(--ink-3);
+  }
+  .none {
+    color: var(--ink-2);
+  }
+</style>

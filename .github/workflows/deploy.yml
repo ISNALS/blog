@@ -1,0 +1,66 @@
+name: Deploy to GitHub Pages
+
+# 触发条件：推送到主分支（也就是"发布文章"这个动作本身），或手动触发。
+# 因为写作面板是往仓库提交 markdown 文件，所以**一次提交就是一次发布**——
+# 不需要任何额外的部署步骤，这里就是那条链路的最后一环。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 允许同时只有一个部署在跑；排队中的旧任务直接取消，避免连续提交时互相覆盖
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 必须与 package.json 的 engines 一致，且满足它声明的下限：
+          # scripts/*.mts 里 `import '../src/lib/xxx.ts'` 依赖 Node 的类型剥离，
+          # 而剥离从 **23.6** 起才默认开启（22.x 需 --experimental-strip-types，
+          # 裸跑报 "Unknown file extension .ts"）。写成 22 会让 CI 挂而本地全绿，
+          # 是最难查的那类"只在 CI 报错"。写范围让 setup-node 取可用的最新版。
+          node-version: '>=23.6'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 单测（面板 GitHub 链路 + frontmatter + 配置预检自测）
+        run: npm test
+
+      - name: 类型与内容 schema 检查
+        run: npm run check
+
+      - name: 构建静态站
+        run: npm run build
+
+      - name: 产物断链检查
+        run: npm run check:links
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,15 @@
+---
+/**
+ * 写文章面板。
+ *
+ * client:only="react" 是刻意的：面板依赖 localStorage 与 GitHub API，
+ * 服务端渲染没有意义；而且它不该出现在任何人的静态产物里（爬虫也抓不到内容）。
+ * 因此这个页面在构建产物里只有一段加载壳。
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Admin from '../components/Admin.tsx';
+---
+
+<BaseLayout title="写文章" description="发布、编辑、删除文章，上传图片，查看热度。" compact>
+  <Admin client:only="react" />
+</BaseLayout>

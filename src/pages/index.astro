@@ -1,0 +1,194 @@
+---
+/**
+ * 首页：超大字刊头 + 离格卡片栅格。
+ *
+ * 结构（能量曲线）：刊头（一击）→ 序号导语（呼吸）→ 置顶大卡（一击）→ 两列错位卡（连绵）。
+ * 所有揭示都走 [data-reveal] / [data-split] / [data-group] 三个动效基元，
+ * 因此首屏与列表用的是同一组时值。
+ */
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PostCard from '../components/PostCard.astro';
+import { SITE } from '../consts';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+const all = (await getCollection('posts', ({ data }) => import.meta.env.PROD ? !data.draft : true))
+  .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
+
+const total = all.length;
+const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
+---
+
+<BaseLayout compact>
+  <section class="hero">
+    <p class="hero-kicker mono" data-reveal data-delay-fixed style="--delay:60ms">
+      {SITE.tagline}
+    </p>
+
+    <h1 class="hero-title" data-split>{SITE.title}</h1>
+
+    <div class="hero-foot">
+      <p class="hero-lead" data-reveal style="--rise:24px">
+        <span class="offset-right">这里放长文章、短笔记，</span><br />
+        以及做过的东西的来龙去脉。
+      </p>
+
+      <dl class="hero-stats mono" data-reveal data-delay-fixed style="--delay:320ms">
+        <div>
+          <dt>文章</dt>
+          <dd>{String(total).padStart(2, '0')}</dd>
+        </div>
+        <div>
+          <dt>标签</dt>
+          <dd>{String(tagsTop.length).padStart(2, '0')}</dd>
+        </div>
+        <div>
+          <dt>更新</dt>
+          <dd>{all[0] ? all[0].data.pubDate.toISOString().slice(0, 10).replace(/-/g, '.') : '—'}</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="feed" aria-labelledby="feed-title">
+    <header class="feed-head">
+      <h2 id="feed-title" class="feed-title" data-reveal data-delay-fixed style="--delay:0ms">
+        最新<span class="accent">/</span>全部
+      </h2>
+      <a class="feed-more mono" href={`${base}/archive`} data-reveal data-delay-fixed style="--delay:120ms">
+        归档 →
+      </a>
+    </header>
+
+    {
+      total === 0 ? (
+        <div class="empty" data-reveal>
+          <p class="empty-title">还没有文章。</p>
+          <p class="empty-hint">
+            去 <a href={`${base}/admin`}>写文章</a> 发布第一篇 —— 支持图片、支持草稿。
+          </p>
+        </div>
+      ) : (
+        <div class="grid" data-group>
+          {all.map((post, i) => (
+            <PostCard post={post} index={i} base={base} feature={post.data.featured} />
+          ))}
+        </div>
+      )
+    }
+  </section>
+</BaseLayout>
+
+<style>
+  .hero {
+    padding-bottom: clamp(3rem, 8vw, 7rem);
+  }
+
+  .hero-kicker {
+    margin: 0 0 clamp(1.5rem, 4vw, 3rem);
+    max-width: 30ch;
+  }
+
+  .hero-title {
+    font-size: var(--step-4);
+    line-height: 0.92;
+    letter-spacing: -0.03em;
+    margin: 0 0 clamp(2rem, 6vw, 4.5rem);
+  }
+
+  .hero-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: clamp(1.5rem, 5vw, 4rem);
+    border-top: 1px solid var(--line);
+    padding-top: clamp(1.5rem, 4vw, 2.5rem);
+  }
+
+  .hero-lead {
+    font-family: var(--serif);
+    font-size: var(--step-1);
+    line-height: 1.6;
+    color: var(--ink-2);
+    margin: 0;
+    max-width: 34ch;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: clamp(1.5rem, 4vw, 3rem);
+    margin: 0;
+  }
+  .hero-stats div {
+    display: grid;
+    gap: 0.35rem;
+  }
+  .hero-stats dt {
+    font-size: 0.68rem;
+    color: var(--ink-3);
+  }
+  .hero-stats dd {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: var(--step-2);
+    line-height: 1;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .feed-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 1rem;
+    margin-bottom: clamp(2rem, 5vw, 3.5rem);
+  }
+  .feed-title {
+    font-size: var(--step-2);
+    margin: 0;
+  }
+  .feed-title .accent {
+    color: var(--accent);
+  }
+  .feed-more {
+    color: var(--ink-3);
+    transition: color var(--dur-1) var(--ease-out);
+  }
+  .feed-more:hover {
+    color: var(--ink);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(2.5rem, 6vw, 5rem) clamp(1.5rem, 4vw, 3.5rem);
+  }
+  @media (min-width: 62rem) {
+    .grid {
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+    }
+  }
+
+  .empty {
+    border: 1px dashed var(--line-2);
+    padding: clamp(2rem, 6vw, 4rem);
+    text-align: center;
+  }
+  .empty-title {
+    font-family: var(--serif);
+    font-size: var(--step-2);
+    margin: 0 0 0.6rem;
+  }
+  .empty-hint {
+    margin: 0;
+    color: var(--ink-2);
+  }
+  .empty-hint a {
+    color: var(--accent);
+    border-bottom: 1px solid currentColor;
+  }
+</style>
