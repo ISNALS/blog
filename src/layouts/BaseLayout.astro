@@ -26,7 +26,16 @@ const pageTitle = title ? `${title} — ${SITE.title}` : `${SITE.title} · ${SIT
 const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const nav = NAV.map((n) => ({ ...n, href: `${base}${n.href}` }));
-const here = Astro.url.pathname.replace(base, '') || '/';
+/**
+ * 当前路径与导航项的比对**必须两侧都归一化**（去掉结尾斜杠）。
+ * 踩过的坑：`here` 是 `/archive`（Astro 的 pathname 无尾斜杠），而 NAV 里写的是
+ * `/archive/`（有尾斜杠），直接相等判断永远为 false —— 于是归档页和关于页的
+ * 首屏高亮**本来就是空的**，再叠加 transition:persist 的 DOM 复用，
+ * 就成了用户看到的"点哪儿都停在首页"。
+ */
+const norm = (p: string) => p.replace(/\/+$/, '') || '/';
+const here = norm(Astro.url.pathname.replace(base, '') || '/');
+const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
 ---
 
 <!doctype html>
@@ -58,16 +67,29 @@ const here = Astro.url.pathname.replace(base, '') || '/';
           <span class="brand-mark" aria-hidden="true"></span>
           <span class="brand-name">{SITE.title}</span>
         </a>
-        <nav class="nav" aria-label="主导航">
+        {/* data-main-nav 是给 src/scripts/nav.ts 定位用的——文章页的目录也是 nav[aria-label]，
+            靠 aria-label 选元素会误伤它 */}
+        <nav class="nav" aria-label="主导航" data-main-nav>
           {
             nav.map((n) => (
-              <a href={n.href} aria-current={here === n.href.replace(base, '') || (n.href.endsWith('/') && here === '/') ? 'page' : undefined}>
+              <a href={n.href} aria-current={isCurrent(n.href) ? 'page' : undefined}>
                 {n.label}
               </a>
             ))
           }
+          {/* 「写」不进主导航的高亮集合：它不在 NAV 里，也不该被当成当前栏目 */}
           <a class="nav-admin" href={`${base}/admin`} title="写文章">写</a>
         </nav>
+        {/*
+          服务器渲染的 aria-current 只在**首屏**正确。头部带 transition:persist，
+          换页时 DOM 被复用、不会重新渲染，所以必须靠脚本在 astro:page-load 时重算，
+          否则下划线会永远停在首页（见 src/scripts/nav.ts 的长注释）。
+        */}
+        <script>
+          import { updateNavCurrent } from '../scripts/nav';
+          updateNavCurrent(document);
+          document.addEventListener('astro:page-load', () => updateNavCurrent(document));
+        </script>
       </div>
     </header>
 
