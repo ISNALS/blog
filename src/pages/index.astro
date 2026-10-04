@@ -29,9 +29,13 @@ const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
     <h1 class="hero-title" data-split>{SITE.title}</h1>
 
     <div class="hero-foot">
+      {/*
+        这句刊头文案改读 SITE.description，不再硬编码。
+        理由：它和 SEO / OG / RSS 的站点描述本来就是同一句话，之前两处各写一遍，
+        改文案时必然漏一处（这次就漏了）。现在只有一个来源。
+      */}
       <p class="hero-lead" data-reveal style="--rise:24px">
-        <span class="offset-right">这里放长文章、短笔记，</span><br />
-        以及做过的东西的来龙去脉。
+        <span class="offset-right">{SITE.description}</span>
       </p>
 
       <dl class="hero-stats mono" data-reveal data-delay-fixed style="--delay:320ms">

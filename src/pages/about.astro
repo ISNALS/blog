@@ -19,7 +19,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
         模板字面量的内容不会被格式化工具重排，所以这个写法不会因为谁顺手
         格式化一下就复发。需要行内标签的段落，标签紧贴文字写、不留换行。
       */}
-      <p data-reveal>{`我是${SITE.author}。这个站用来放长文章、短笔记，以及做过的东西的来龙去脉。${SITE.tagline}`}</p>
+      <p data-reveal>{`我是${SITE.author}。${SITE.description}——长文章、短笔记，以及做过的东西，都放在这里。`}</p>
 
       <p data-reveal>
         站点是纯静态的——没有服务器、没有数据库，内容和图片都以文件形式存在<a
