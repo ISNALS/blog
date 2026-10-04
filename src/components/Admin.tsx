@@ -151,17 +151,47 @@ export default function Admin() {
     if (!editing.fm.title.trim()) return say('err', '标题不能为空');
     const isNew = !editing.path;
     const path = editing.path ?? `${GITHUB.postsDir}/${slugify(editing.fm.title, editing.fm.pubDate)}.md`;
+    const body = serialize(editing.fm, editing.body);
+    const msg = isNew ? `post: ${editing.fm.title}` : `post: update ${editing.fm.title}`;
+
     setBusy(isNew ? '发布中…' : '保存中…');
-    const r = await writeFile(
-      path,
-      serialize(editing.fm, editing.body),
-      isNew ? `post: ${editing.fm.title}` : `post: update ${editing.fm.title}`,
-      token,
-      editing.sha,
-    );
+    let r = await writeFile(path, body, msg, token, editing.sha);
+
+    /**
+     * 409 = 我们手里那个文件的 sha 已过期。
+     *
+     * 为什么会过期：任何在 GitHub 侧改动过这个文件的操作都会换掉它的 sha——
+     * 在网页上编辑过、别人改过，或者**本地做过 rebase / amend**（rebase 会重写提交，
+     * blob 的 sha 跟着变）。我自己就制造过一次：为了合并面板发出的提交做了 rebase，
+     * 结果面板里一保存就 409，而当时的代码只能把错误甩给用户、让他自己刷新页面。
+     *
+     * 既然 409 明确表示"我的版本旧了"，那就自动取回最新 sha 再试一次。
+     * 单人博客不存在并发编辑，这一次重试是安全的；正文以**编辑器里的内容**为准，
+     * 所以"文件在别处被改过"的担心不适用。
+     */
+    let recovered = false;
+    if (!r.ok && r.status === 409) {
+      setBusy('文件指纹已更新，正在重试…');
+      const fresh = await readFile(path, token);
+      if (fresh.ok && fresh.data?.sha) {
+        r = await writeFile(path, body, msg, token, fresh.data.sha);
+        recovered = r.ok;
+      }
+    }
+
     setBusy(null);
-    if (!r.ok) return say('err', `提交失败：${r.error}`);
-    say('ok', isNew ? '已提交，站点重建中（约 1 分钟）' : '已保存');
+    if (!r.ok) {
+      return say(
+        'err',
+        `提交失败：${r.error}` +
+          (r.status === 409 ? '（文件刚被其它操作改动过，请重新打开这篇文章再保存）' : ''),
+      );
+    }
+    say(
+      'ok',
+      (isNew ? '已提交，站点重建中（约 1 分钟）' : '已保存') +
+        (recovered ? '（文件指纹已自动更新后重试成功）' : ''),
+    );
     setView('list');
     void refresh();
   };

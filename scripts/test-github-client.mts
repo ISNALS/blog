@@ -202,6 +202,36 @@ ok('带正确 sha 时更新成功', updated.ok, updated.error);
 const reread = await gh.readFile('src/content/posts/2026-10-04-test.md', TOKEN);
 ok('更新后内容正确', reread.data?.text === CJK + '\n补一句。');
 
+console.log('\n[4b] 过期 sha 的自动恢复（面板在 save 里做的那套动作）');
+// 真实事故：本地做了一次 git rebase（为了合并面板发出的提交），rebase 重写提交 →
+// 文件的 blob sha 变了 → 面板里再保存就 409，而当时的代码只能把错误甩给用户、
+// 让他自己刷新页面。面板现在的做法是：遇 409 → 重新读文件拿新 sha → 用新 sha 再写一次。
+// 这里逐条验证那套动作成立。
+{
+  const p = 'src/content/posts/2026-10-04-test.md';
+  const before = store.get(p)!;
+
+  const stale = await gh.writeFile(p, '正文 v2', 'try', TOKEN, '一个过期 sha');
+  ok('过期 sha 写入被拒（409）', !stale.ok && stale.status === 409, `status=${stale.status}`);
+
+  const fresh = await gh.readFile(p, TOKEN);
+  ok('重新读取能拿到当前 sha', fresh.ok && fresh.data?.sha === before.sha, String(fresh.data?.sha));
+
+  const retry = await gh.writeFile(p, '正文 v2', 'try', TOKEN, fresh.data!.sha);
+  ok('用新 sha 重试成功', retry.ok, retry.error);
+  ok('重试后内容正确', store.get(p)?.content === '正文 v2', store.get(p)?.content);
+
+  // 反向断言：重试时 sha 若又过期，必须**仍然失败**，不能假装成功或静默覆盖
+  store.set(p, { content: '别人刚改过', sha: 'another-sha' });
+  const stillStale = await gh.writeFile(p, '正文 v3', 'try', TOKEN, fresh.data!.sha);
+  ok(
+    '重试时 sha 又过期 → 仍失败，不静默覆盖',
+    !stillStale.ok && stillStale.status === 409,
+    `status=${stillStale.status}`,
+  );
+  ok('失败时没有改动文件', store.get(p)?.content === '别人刚改过', store.get(p)?.content);
+}
+
 console.log('\n[5] 列目录（应只返回该目录下的文件）');
 const listed = await gh.listDir('src/content/posts', TOKEN);
 ok('列出文章目录', listed.ok && (listed.data?.length ?? 0) === 1, `count=${listed.data?.length}`);
@@ -247,7 +277,11 @@ const upNear = await gh.uploadImage(okFile, TOKEN, undefined, '/blog');
 ok('900KB 图片正常放行（不误伤）', upNear.ok, upNear.error);
 
 console.log('\n[7] 删除');
-const del = await gh.deleteFile('src/content/posts/2026-10-04-test.md', reread.data!.sha, 'delete', TOKEN);
+// 注意：必须用**当前**的 sha。前面 [4b] 又改过这个文件，早先拿到的 sha 已经失效——
+// 我第一版就是直接用旧的 reread.sha，结果"删除成功"这条断言红了（409）。
+// 这恰好说明服务端的 sha 校验是有效的，不是我该绕过去的东西。
+const forDelete = await gh.readFile('src/content/posts/2026-10-04-test.md', TOKEN);
+const del = await gh.deleteFile('src/content/posts/2026-10-04-test.md', forDelete.data!.sha, 'delete', TOKEN);
 ok('删除成功', del.ok, del.error);
 ok('删除后读不到了', (await gh.readFile('src/content/posts/2026-10-04-test.md', TOKEN)).status === 404);
 const delAgain = await gh.deleteFile('src/content/posts/2026-10-04-test.md', 'stale-sha', 'delete', TOKEN);
