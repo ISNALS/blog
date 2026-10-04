@@ -38,8 +38,6 @@ export function updateNavCurrent(root: ParentNode = document) {
 
   let matched = false;
   for (const a of nav.querySelectorAll<HTMLAnchorElement>('a')) {
-    // 后台入口（「写」）不参与高亮：它不在主导航集合里，也不该抢当前项
-    if (a.classList.contains('nav-admin')) continue;
     if (linkPath(a) === here) {
       a.setAttribute('aria-current', 'page');
       matched = true;

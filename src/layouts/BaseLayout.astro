@@ -94,8 +94,9 @@ const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
               </a>
             ))
           }
-          {/* 「写」不进主导航的高亮集合：它不在 NAV 里，也不该被当成当前栏目 */}
-          <a class="nav-admin" href={`${base}/admin`} title="写文章">写</a>
+          {/* 写作面板的入口刻意不放在导航里：它是只给站主用的页面，
+              访客没有 token 也写不了（GitHub 会 401），但没必要把它摆在最显眼处。
+              需要时直接访问 /admin 即可（地址见 README）。 */}
         </nav>
         {/*
           服务器渲染的 aria-current 只在**首屏**正确。头部带 transition:persist，
@@ -234,10 +235,6 @@ const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
       .nav a:hover::after,
       .nav a[aria-current='page']::after {
         transform: scaleX(1);
-      }
-      .nav-admin {
-        font-family: var(--mono);
-        text-transform: uppercase;
       }
 
       main {
