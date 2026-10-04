@@ -10,15 +10,21 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
     <h1 class="about-title" data-split>关于</h1>
 
     <div class="about-body" data-article-body>
-      <p data-reveal>
-        我是 {SITE.author}。这个站用来放长文章、短笔记，以及做过的东西的来龙去脉。
-        {SITE.tagline}
-      </p>
+      {/*
+        正文用**模板字面量**而不是 JSX 文本 + 表达式的混排，原因是一个真踩过的坑：
+        Astro 会把跨行书写的表达式两侧的缩进换行**渲染成一个字面空格**，
+        于是
+            <p>我是 {SITE.author}。…</p>
+        会输出 "我是 八尺雪。"——中文之间凭空多一个空格。
+        模板字面量的内容不会被格式化工具重排，所以这个写法不会因为谁顺手
+        格式化一下就复发。需要行内标签的段落，标签紧贴文字写、不留换行。
+      */}
+      <p data-reveal>{`我是${SITE.author}。这个站用来放长文章、短笔记，以及做过的东西的来龙去脉。${SITE.tagline}`}</p>
 
       <p data-reveal>
-        站点是纯静态的——没有服务器、没有数据库，内容和图片都以文件形式存在
-        <a href={`https://github.com/${GITHUB.user}/${GITHUB.repo}`}>GitHub 仓库</a>里，
-        由 GitHub Pages 托管。写文章在本站的 <a href={`${base}/admin`}>写文章</a> 面板完成：
+        站点是纯静态的——没有服务器、没有数据库，内容和图片都以文件形式存在<a
+          href={`https://github.com/${GITHUB.user}/${GITHUB.repo}`}>GitHub 仓库</a
+        >里，由 GitHub Pages 托管。写文章在本站的<a href={`${base}/admin`}>写文章</a>面板完成：
         提交即发布，撤稿就是删掉那次提交。
       </p>
 
@@ -34,8 +40,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
       <h2 data-reveal>联系</h2>
       <p data-reveal>
-        想聊的话，去 GitHub 找我：
-        <a href={`https://github.com/${GITHUB.user}`}>@{GITHUB.user}</a>。
+        想聊的话，去 GitHub 找我：<a href={`https://github.com/${GITHUB.user}`}>@{GITHUB.user}</a>。
       </p>
     </div>
   </article>
