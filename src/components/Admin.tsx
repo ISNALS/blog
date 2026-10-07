@@ -38,6 +38,7 @@ import {
   type ShelfItem,
   type Track,
 } from '@/lib/shelf';
+import { createSaver } from '@/lib/saver';
 
 type View = 'list' | 'editor' | 'views' | 'shelf';
 
@@ -514,13 +515,32 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
 
-  // sha 与当前数据都放 ref：写入是串行的，必须拿到**最新的**值，
-  // 而这个函数在队列里异步执行，闭包里的 state 会是入队那一刻的旧快照。
-  const shaRef = useRef<string | undefined>(undefined);
+  // 当前数据放 ref：写入在队列里异步执行，闭包里的 state 会是入队那一刻的旧快照。
   const shelfRef = useRef<Shelf>(EMPTY_SHELF);
   const savedTextRef = useRef<Set<string>>(new Set());
-  /** 写入队列：同一时刻只允许一个在途请求 */
-  const queueRef = useRef<Promise<void>>(Promise.resolve());
+
+  /**
+   * 写入交给 src/lib/saver.ts 的串行保存器。
+   *
+   * 这里曾经是手写的「enqueue + shaRef」，修过一次并发 409 但仍有漏——
+   * 用户改完封面紧接着改星星，又报了 409。问题是那套逻辑**没法被测**：
+   * 它长在组件里，要验证"连续两次写入不抢 sha"就得跑整个 React 面板。
+   * 抽成独立模块后，scripts/test-saver.mts 能用假 GitHub API 把
+   * 用户的操作序列真的跑一遍（含"裸并发会坏"的反向断言）。
+   * **可靠性靠结构保证，而不是靠读代码确认。**
+   */
+  const saverRef = useRef(
+    createSaver({
+      path: SHELF_PATH,
+      token,
+      read: (p, t) => readFile(p, t),
+      write: (p, b, m, t, s) => writeFile(p, b, m, t, s),
+      onChange: ({ saving: busy, label, error }) => {
+        setSaving(busy ? (label ?? '保存中…') : null);
+        if (error) onToast('err', `保存失败：${error}`);
+      },
+    }),
+  );
 
   /** 应用一份新数据到 state 与 ref（两处必须同步，否则下一次写入会「恢复旧值」） */
   const applyShelf = useCallback((next: Shelf) => {
@@ -538,10 +558,10 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
         onToast('err', 'shelf.json 解析失败，已用空清单打开（保存会覆盖它）');
         applyShelf(EMPTY_SHELF);
       }
-      shaRef.current = r.data.sha;
+      saverRef.current.setSha(r.data.sha);
     } else if (r.status === 404) {
       applyShelf(EMPTY_SHELF);
-      shaRef.current = undefined;
+      saverRef.current.setSha(undefined);
     } else {
       onToast('err', `读取清单失败：${r.error}`);
     }
@@ -552,67 +572,22 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
     void load();
   }, [load]);
 
-  /** 入队执行：保证写入串行，从根上消除 sha 竞争 */
-  const enqueue = (job: () => Promise<void>) => {
-    const next = queueRef.current.then(job, job);
-    // 吞掉链上的异常，避免一次失败让后续保存全部卡死
-    queueRef.current = next.catch(() => undefined);
-    return next;
-  };
-
-  /**
-   * 写回仓库。
-   *
-   * 这里修的是一个**真实发生过的故障**：面板里每个输入框的 onBlur 都会提交一次，
-   * 连续改标题→年份→短评时，多次 persist 会**并发**跑，各自拿着同一个旧 sha，
-   * 于是第二个开始必然 409（错误信息形如 "is at 475a2e3 but expected 127269a"
-   * ——差的正好是一个版本，这就是并发的指纹）。原来的"409 就重试一次"也不够：
-   * 两次并发请求会同时重试、再次撞车。
-   *
-   * 现在两道保险：
-   *   ① `shaRef` —— 写成功后立刻更新，后续保存不会再用过期值
-   *   ② `queue`  —— 把写入串行化，同一时刻只有一个在途请求，从根上消除竞争
-   * 另：内容在**入队时**快照（`run()` 里读 shelfRef），
-   * 所以后一次编辑不会被前一次"回写"的旧数据覆盖。
-   */
-  const persist = (next: Shelf, label: string) => {
+  /** 写回仓库：排队执行，连续调用安全（顺序由 saver 保证） */
+  const persist = async (next: Shelf, label: string) => {
     const snapshot = next;
-    return enqueue(async () => {
-      setSaving(label);
-      const body = `${JSON.stringify(snapshot, null, 2)}\n`;
-      let r = await writeFile(SHELF_PATH, body, `shelf: ${label}`, token, shaRef.current);
+    const body = `${JSON.stringify(snapshot, null, 2)}\n`;
+    const res = await saverRef.current.save(body, `shelf: ${label}`);
+    if (!res.ok) return;
 
-      // 409＝我手里的 sha 过期了。重新取当前的，用编辑器里的内容再写一次。
-      if (!r.ok && r.status === 409) {
-        const fresh = await readFile(SHELF_PATH, token);
-        if (fresh.ok && fresh.data?.sha) {
-          shaRef.current = fresh.data.sha;
-          r = await writeFile(SHELF_PATH, body, `shelf: ${label}`, token, fresh.data.sha);
-        }
-      }
-
-      setSaving(null);
-      if (!r.ok) {
-        // 409 时把 GitHub 的原话一并给出：它能区分"过期 sha"和"根本没权限"，
-        // 只回一句"保存失败"会让人无从下手（这次就是被这句含糊的话拖了时间）。
-        const hint = r.status === 409 ? '（版本冲突已自动重试仍失败，请刷新页面后重试）' : '';
-        return onToast('err', `保存失败：${r.error}${hint}`);
-      }
-
-      // 写成功后立刻取回新 sha，供下一次保存使用
-      const after = await readFile(SHELF_PATH, token);
-      if (after.ok && after.data?.sha) shaRef.current = after.data.sha;
-
-      // 只把"还没有更新过的字段"合并进来，避免覆盖用户此刻正在敲的内容
-      const cur = shelfRef.current;
-      const merged: Shelf = { ...snapshot };
-      for (const k of SHELF_TEXT_KEYS) {
-        if (cur[k] !== snapshot[k] && !savedTextRef.current.has(k)) merged[k] = cur[k] as never;
-      }
-      savedTextRef.current = new Set(SHELF_TEXT_KEYS.filter((k) => merged[k] === snapshot[k]));
-      applyShelf(merged);
-      onToast('ok', `已保存 · ${label}（站点约 1 分钟后更新）`);
-    });
+    // 只把"还没有更新过的字段"合并进来，避免覆盖用户此刻正在敲的内容
+    const cur = shelfRef.current;
+    const merged: Shelf = { ...snapshot };
+    for (const k of SHELF_TEXT_KEYS) {
+      if (cur[k] !== snapshot[k] && !savedTextRef.current.has(k)) merged[k] = cur[k] as never;
+    }
+    savedTextRef.current = new Set(SHELF_TEXT_KEYS.filter((k) => merged[k] === snapshot[k]));
+    applyShelf(merged);
+    onToast('ok', `已保存 · ${label}（站点约 1 分钟后更新）`);
   };
 
   const addAnime = () =>

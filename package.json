@@ -14,7 +14,7 @@
     "check:links": "node scripts/check-links.mjs",
     "check:config": "node scripts/check-config.mjs",
     "selftest:config": "node scripts/selftest-config-check.mts",
-    "test": "node scripts/test-post-format.mts && node scripts/test-github-client.mts && node scripts/test-find-chrome.mjs && npm run selftest:config",
+    "test": "node scripts/test-post-format.mts && node scripts/test-github-client.mts && node scripts/test-saver.mts && node scripts/test-find-chrome.mjs && npm run selftest:config",
     "test:nav": "node scripts/test-nav-with-server.mjs",
     "test:probe": "node scripts/test-probe-with-server.mjs",
     "test:home": "node scripts/test-home-with-server.mjs",
