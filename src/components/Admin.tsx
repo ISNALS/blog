@@ -38,7 +38,6 @@ import {
   type ShelfItem,
   type Track,
 } from '@/lib/shelf';
-import { createSaver } from '@/lib/saver';
 
 type View = 'list' | 'editor' | 'views' | 'shelf';
 
@@ -507,129 +506,147 @@ export default function Admin() {
    否则连续编辑会互相抢 sha（详见 persist 的注释）。
    ------------------------------------------------------------------------- */
 
-/** shelf 里的纯文本字段（标题/说明）。回写时对它们做"用户是否已在改"的判断 */
-const SHELF_TEXT_KEYS = ['animeTitle', 'animeNote', 'musicTitle', 'musicNote'] as const;
-
 function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'err', m: string) => void }) {
-  const [shelf, setShelf] = useState<Shelf>(EMPTY_SHELF);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<string | null>(null);
-
-  // 当前数据放 ref：写入在队列里异步执行，闭包里的 state 会是入队那一刻的旧快照。
-  const shelfRef = useRef<Shelf>(EMPTY_SHELF);
-  const savedTextRef = useRef<Set<string>>(new Set());
-
   /**
-   * 写入交给 src/lib/saver.ts 的串行保存器。
+   * 这里原本是**自动保存**：每个输入框的 onBlur 就提交一次。
+   * 那个设计是错的，用户直接反馈了症状：
+   *   「不能一起改，只能等一个生效了另一个才能改」
+   * 连续编辑会触发多次并发写入、互相抢 sha，于是不断报 409；
+   * 更糟的是它把"编辑"这件本该自由的事变成了要排队等待的操作。
    *
-   * 这里曾经是手写的「enqueue + shaRef」，修过一次并发 409 但仍有漏——
-   * 用户改完封面紧接着改星星，又报了 409。问题是那套逻辑**没法被测**：
-   * 它长在组件里，要验证"连续两次写入不抢 sha"就得跑整个 React 面板。
-   * 抽成独立模块后，scripts/test-saver.mts 能用假 GitHub API 把
-   * 用户的操作序列真的跑一遍（含"裸并发会坏"的反向断言）。
-   * **可靠性靠结构保证，而不是靠读代码确认。**
+   * 现在改成**整份草稿 + 一个保存按钮**：
+   *   · 所有改动只落在本地 draft，不碰网络
+   *   · 按「保存并发布」才提交一次（只有一个在途请求，结构上不可能再抢 sha）
+   *   · 与上次保存的内容逐字比较（JSON），有差异才允许提交
+   *   · 离开页面/切标签页时若有未保存改动，提示一下，避免白改
    */
-  const saverRef = useRef(
-    createSaver({
-      path: SHELF_PATH,
-      token,
-      read: (p, t) => readFile(p, t),
-      write: (p, b, m, t, s) => writeFile(p, b, m, t, s),
-      onChange: ({ saving: busy, label, error }) => {
-        setSaving(busy ? (label ?? '保存中…') : null);
-        if (error) onToast('err', `保存失败：${error}`);
-      },
-    }),
-  );
+  const [baseline, setBaseline] = useState<Shelf>(EMPTY_SHELF);
+  const [draft, setDraft] = useState<Shelf>(EMPTY_SHELF);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const shaRef = useRef<string | undefined>(undefined);
+  const allowLeaveRef = useRef(false);
 
-  /** 应用一份新数据到 state 与 ref（两处必须同步，否则下一次写入会「恢复旧值」） */
-  const applyShelf = useCallback((next: Shelf) => {
-    shelfRef.current = next;
-    setShelf(next);
-  }, []);
+  const bodyOf = (s: Shelf) => `${JSON.stringify(s, null, 2)}\n`;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
 
   const load = useCallback(async () => {
     setLoading(true);
     const r = await readFile(SHELF_PATH, token);
     if (r.ok && r.data) {
+      let next = EMPTY_SHELF;
       try {
-        applyShelf(normalizeShelf(JSON.parse(r.data.text)));
+        next = normalizeShelf(JSON.parse(r.data.text));
       } catch {
         onToast('err', 'shelf.json 解析失败，已用空清单打开（保存会覆盖它）');
-        applyShelf(EMPTY_SHELF);
       }
-      saverRef.current.setSha(r.data.sha);
+      setBaseline(next);
+      setDraft(next);
+      shaRef.current = r.data.sha;
     } else if (r.status === 404) {
-      applyShelf(EMPTY_SHELF);
-      saverRef.current.setSha(undefined);
+      setBaseline(EMPTY_SHELF);
+      setDraft(EMPTY_SHELF);
+      shaRef.current = undefined;
     } else {
       onToast('err', `读取清单失败：${r.error}`);
     }
     setLoading(false);
-  }, [token, onToast, applyShelf]);
+  }, [token, onToast]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  /** 写回仓库：排队执行，连续调用安全（顺序由 saver 保证） */
-  const persist = async (next: Shelf, label: string) => {
-    const snapshot = next;
-    const body = `${JSON.stringify(snapshot, null, 2)}\n`;
-    const res = await saverRef.current.save(body, `shelf: ${label}`);
-    if (!res.ok) return;
+  // 有未保存改动时，关页面/切走给一次拦截（浏览器只允许提示，不能自定义文案）
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!dirty || allowLeaveRef.current) return;
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
 
-    // 只把"还没有更新过的字段"合并进来，避免覆盖用户此刻正在敲的内容
-    const cur = shelfRef.current;
-    const merged: Shelf = { ...snapshot };
-    for (const k of SHELF_TEXT_KEYS) {
-      if (cur[k] !== snapshot[k] && !savedTextRef.current.has(k)) merged[k] = cur[k] as never;
+  /** 提交：唯一会写仓库的地方。只有一次在途请求，所以不存在 sha 竞争 */
+  const publish = async () => {
+    if (!dirty) return;
+    setBusy('保存中…');
+    let r = await writeFile(SHELF_PATH, bodyOf(draft), 'shelf: 更新清单', token, shaRef.current);
+
+    // 409＝手里的 sha 过期（比如上次在 GitHub 网页上改过）。重取一次再写。
+    if (!r.ok && r.status === 409) {
+      const fresh = await readFile(SHELF_PATH, token);
+      if (fresh.ok && fresh.data?.sha) {
+        shaRef.current = fresh.data.sha;
+        r = await writeFile(SHELF_PATH, bodyOf(draft), 'shelf: 更新清单', token, fresh.data.sha);
+      }
     }
-    savedTextRef.current = new Set(SHELF_TEXT_KEYS.filter((k) => merged[k] === snapshot[k]));
-    applyShelf(merged);
-    onToast('ok', `已保存 · ${label}（站点约 1 分钟后更新）`);
+
+    if (!r.ok) {
+      setBusy(null);
+      return onToast('err', `保存失败：${r.error}`);
+    }
+
+    const after = await readFile(SHELF_PATH, token);
+    if (after.ok && after.data?.sha) shaRef.current = after.data.sha;
+    setBusy(null);
+    allowLeaveRef.current = true;
+    setBaseline(draft);
+    onToast('ok', '已发布，站点约 1 分钟后更新');
   };
 
-  const addAnime = () =>
-    persist({ ...shelf, anime: [...shelf.anime, { title: '新番剧', stars: 4 }] }, '新增番剧');
+  /** 丢弃未保存改动，回到上次保存的状态 */
+  const discard = () => {
+    setDraft(baseline);
+    onToast('ok', '已丢弃未保存的改动');
+  };
 
-  const addTrack = () =>
-    persist({ ...shelf, music: [...shelf.music, { title: '新歌', src: '' }] }, '新增曲目');
-
-  const patchAnime = (i: number, patch: Partial<ShelfItem>) =>
-    setShelf((s) => ({ ...s, anime: s.anime.map((a, j) => (j === i ? { ...a, ...patch } : a)) }));
-
-  const patchTrack = (i: number, patch: Partial<Track>) =>
-    setShelf((s) => ({ ...s, music: s.music.map((t, j) => (j === i ? { ...t, ...patch } : t)) }));
-
+  /**
+   * 上传：图片/音频**立刻**进仓库（它们是独立文件，不冲突），
+   * 但把地址填回表单后仍需按保存才会写进清单——这样"发布"这个动作只有一个。
+   */
   const onUploadCover = async (i: number, file: File) => {
-    setSaving('上传封面…');
+    setBusy('上传封面…');
     const r = await uploadImage(file, token, undefined, import.meta.env.BASE_URL);
-    setSaving(null);
+    setBusy(null);
     if (!r.ok || !r.data) return onToast('err', `封面上传失败：${r.error}`);
-    const next = { ...shelf, anime: shelf.anime.map((a, j) => (j === i ? { ...a, cover: r.data!.url } : a)) };
-    await persist(next, '换封面');
+    setDraft((d) => ({ ...d, anime: d.anime.map((a, j) => (j === i ? { ...a, cover: r.data!.url } : a)) }));
+    onToast('ok', '封面已上传，记得按「保存并发布」写进清单');
   };
 
   const onUploadAudio = async (i: number, file: File) => {
-    setSaving('上传音频…');
-    const r = await uploadAudio(file, token, (p) => setSaving(`上传音频… ${p}%`), import.meta.env.BASE_URL);
-    setSaving(null);
+    setBusy('上传音频…');
+    const r = await uploadAudio(file, token, (p) => setBusy(`上传音频… ${p}%`), import.meta.env.BASE_URL);
+    setBusy(null);
     if (!r.ok || !r.data) return onToast('err', `音频上传失败：${r.error}`);
-    const next = {
-      ...shelf,
-      music: shelf.music.map((t, j) => (j === i ? { ...t, src: r.data!.url, title: t.title === '新歌' ? file.name.replace(/\.[^.]+$/, '') : t.title } : t)),
-    };
-    await persist(next, '换音频');
+    setDraft((d) => ({
+      ...d,
+      music: d.music.map((t, j) =>
+        j === i
+          ? { ...t, src: r.data!.url, title: t.title === '新歌' ? file.name.replace(/\.[^.]+$/, '') : t.title }
+          : t,
+      ),
+    }));
+    onToast('ok', '音频已上传，记得按「保存并发布」写进清单');
   };
+
+  const setText = (patch: Partial<Pick<Shelf, 'animeTitle' | 'animeNote' | 'musicTitle' | 'musicNote'>>) =>
+    setDraft((d) => ({ ...d, ...patch }));
+  const patchAnime = (i: number, patch: Partial<ShelfItem>) =>
+    setDraft((d) => ({ ...d, anime: d.anime.map((a, j) => (j === i ? { ...a, ...patch } : a)) }));
+  const patchTrack = (i: number, patch: Partial<Track>) =>
+    setDraft((d) => ({ ...d, music: d.music.map((t, j) => (j === i ? { ...t, ...patch } : t)) }));
+  const addAnime = () => setDraft((d) => ({ ...d, anime: [...d.anime, { title: '新番剧', stars: 4 }] }));
+  const addTrack = () => setDraft((d) => ({ ...d, music: [...d.music, { title: '新歌', src: '' }] }));
 
   if (loading) return <p className="none">读取收藏清单…</p>;
 
   return (
     <section className="shelfpanel">
       <p className="mono shelfpanel-hint">
-        清单放在仓库的 <code>{SHELF_PATH}</code>。改完立刻提交，站点约 1 分钟后更新。
-        番剧封面可以直接填外链（Bangumi / AniList 的图），比上传更省仓库体积。
+        清单放在仓库的 <code>{SHELF_PATH}</code>。**这里改什么都只留在本地**，
+        按下面的「保存并发布」才提交（一次提交，约 1 分钟后站点更新）。
+        番剧封面可以填外链（Bangumi / AniList 的图），也可以点「换封面」上传。
       </p>
 
       {/* ── 番剧 ── */}
@@ -637,35 +654,33 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
         <div className="shelfpanel-head">
           <input
             className="mono titleinput"
-            value={shelf.animeTitle}
-            onChange={(e) => setShelf((s) => ({ ...s, animeTitle: e.target.value }))}
-            onBlur={() => persist(shelf, '改番剧标题')}
+            value={draft.animeTitle}
+            onChange={(e) => setText({ animeTitle: e.target.value })}
           />
           <input
             className="mono noteinput"
             placeholder="一句说明（可留空）"
-            value={shelf.animeNote}
-            onChange={(e) => setShelf((s) => ({ ...s, animeNote: e.target.value }))}
-            onBlur={() => persist(shelf, '改番剧说明')}
+            value={draft.animeNote}
+            onChange={(e) => setText({ animeNote: e.target.value })}
           />
           <button className="ghost" onClick={addAnime}>
             ＋ 加一部
           </button>
         </div>
 
-        {shelf.anime.map((a, i) => (
+        {draft.anime.map((a, i) => (
           <div className="shelfrow" key={`a${i}`}>
             <div className="shelfrow-cover">
               {a.cover ? <img src={a.cover} alt="" /> : <span className="mono">无图</span>}
             </div>
             <div className="shelfrow-fields">
-              <input value={a.title} placeholder="标题" onChange={(e) => patchAnime(i, { title: e.target.value })} onBlur={() => persist(shelf, '改番剧')} />
-              <input value={a.sub ?? ''} placeholder="年份 / 补充" onChange={(e) => patchAnime(i, { sub: e.target.value })} onBlur={() => persist(shelf, '改番剧')} />
-              <input value={a.cover ?? ''} placeholder="封面 URL（可外链）" onChange={(e) => patchAnime(i, { cover: e.target.value })} onBlur={() => persist(shelf, '改封面')} />
-              <input value={a.note ?? ''} placeholder="短评（可留空）" onChange={(e) => patchAnime(i, { note: e.target.value })} onBlur={() => persist(shelf, '改短评')} />
+              <input value={a.title} placeholder="标题" onChange={(e) => patchAnime(i, { title: e.target.value })} />
+              <input value={a.sub ?? ''} placeholder="年份 / 补充" onChange={(e) => patchAnime(i, { sub: e.target.value })} />
+              <input value={a.cover ?? ''} placeholder="封面 URL（可外链）" onChange={(e) => patchAnime(i, { cover: e.target.value })} />
+              <input value={a.note ?? ''} placeholder="短评（可留空）" onChange={(e) => patchAnime(i, { note: e.target.value })} />
             </div>
             <div className="shelfrow-side">
-              <select value={a.stars ?? 0} onChange={(e) => persist({ ...shelf, anime: shelf.anime.map((x, j) => (j === i ? { ...x, stars: Number(e.target.value) || undefined } : x)) }, '改评分')}>
+              <select value={a.stars ?? 0} onChange={(e) => patchAnime(i, { stars: Number(e.target.value) || undefined })}>
                 <option value={0}>未评分</option>
                 {[1, 2, 3, 4, 5].map((n) => (
                   <option key={n} value={n}>{'★'.repeat(n)}</option>
@@ -675,7 +690,7 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
                 换封面
                 <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUploadCover(i, f); e.target.value = ''; }} />
               </label>
-              <button className="ghost danger" onClick={() => persist({ ...shelf, anime: shelf.anime.filter((_, j) => j !== i) }, '删番剧')}>
+              <button className="ghost danger" onClick={() => setDraft((d) => ({ ...d, anime: d.anime.filter((_, j) => j !== i) }))}>
                 删除
               </button>
             </div>
@@ -688,16 +703,14 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
         <div className="shelfpanel-head">
           <input
             className="mono titleinput"
-            value={shelf.musicTitle}
-            onChange={(e) => setShelf((s) => ({ ...s, musicTitle: e.target.value }))}
-            onBlur={() => persist(shelf, '改音乐标题')}
+            value={draft.musicTitle}
+            onChange={(e) => setText({ musicTitle: e.target.value })}
           />
           <input
             className="mono noteinput"
             placeholder="一句说明（可留空）"
-            value={shelf.musicNote}
-            onChange={(e) => setShelf((s) => ({ ...s, musicNote: e.target.value }))}
-            onBlur={() => persist(shelf, '改音乐说明')}
+            value={draft.musicNote}
+            onChange={(e) => setText({ musicNote: e.target.value })}
           />
           <button className="ghost" onClick={addTrack}>
             ＋ 加一首
@@ -709,23 +722,23 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
           仓库是公开的，上传等于公开发布。
         </p>
 
-        {shelf.music.map((t, i) => (
+        {draft.music.map((t, i) => (
           <div className="shelfrow" key={`m${i}`}>
             <div className="shelfrow-cover">
               {t.cover ? <img src={t.cover} alt="" /> : <span className="mono">♪</span>}
             </div>
             <div className="shelfrow-fields">
-              <input value={t.title} placeholder="曲名" onChange={(e) => patchTrack(i, { title: e.target.value })} onBlur={() => persist(shelf, '改曲目')} />
-              <input value={t.artist ?? ''} placeholder="艺术家" onChange={(e) => patchTrack(i, { artist: e.target.value })} onBlur={() => persist(shelf, '改曲目')} />
-              <input value={t.src} placeholder="音频地址（可外链，或点右边上传）" onChange={(e) => patchTrack(i, { src: e.target.value })} onBlur={() => persist(shelf, '改音频地址')} />
-              <input value={t.cover ?? ''} placeholder="封面 URL（可留空）" onChange={(e) => patchTrack(i, { cover: e.target.value })} onBlur={() => persist(shelf, '改封面')} />
+              <input value={t.title} placeholder="曲名" onChange={(e) => patchTrack(i, { title: e.target.value })} />
+              <input value={t.artist ?? ''} placeholder="艺术家" onChange={(e) => patchTrack(i, { artist: e.target.value })} />
+              <input value={t.src} placeholder="音频地址（可外链，或点右边上传）" onChange={(e) => patchTrack(i, { src: e.target.value })} />
+              <input value={t.cover ?? ''} placeholder="封面 URL（可留空）" onChange={(e) => patchTrack(i, { cover: e.target.value })} />
             </div>
             <div className="shelfrow-side">
               <label className="ghost filebtn">
                 上传音频
                 <input type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUploadAudio(i, f); e.target.value = ''; }} />
               </label>
-              <button className="ghost danger" onClick={() => persist({ ...shelf, music: shelf.music.filter((_, j) => j !== i) }, '删曲目')}>
+              <button className="ghost danger" onClick={() => setDraft((d) => ({ ...d, music: d.music.filter((_, j) => j !== i) }))}>
                 删除
               </button>
             </div>
@@ -733,10 +746,24 @@ function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'er
         ))}
       </div>
 
-      {saving && <div className="busy mono">{saving}</div>}
+      {/* 保存条：挪到内容之后、并吸底，改完直接就能按到 */}
+      <div className="shelfbar" data-dirty={dirty ? 'true' : 'false'}>
+        <span className="mono shelfbar-state">
+          {busy ? busy : dirty ? '有未保存的改动' : '已与仓库一致'}
+        </span>
+        <span className="shelfbar-actions">
+          <button className="ghost" onClick={discard} disabled={!dirty || !!busy}>
+            丢弃改动
+          </button>
+          <button className="primary" onClick={() => void publish()} disabled={!dirty || !!busy}>
+            保存并发布
+          </button>
+        </span>
+      </div>
     </section>
   );
 }
+
 
 function ViewsPanel({ posts, token }: { posts: TreeEntry[]; token: string }) {
   const [data, setData] = useState<Record<string, number | null>>({});
@@ -909,6 +936,21 @@ function AdminStyles() {
          输入框用 onBlur 触发保存，所以视觉上要能看出"这是一行可编辑的数据"
          而不是一个表单——所以保持极简边框，焦点时才亮。 */
       .shelfpanel { display: grid; gap: 2.5rem; }
+
+      /* 保存条：吸在视口底部，改完不用往上找按钮。
+         有未保存改动时描边亮起 —— 这是"当前状态"里最重要的一条信息。 */
+      .shelfbar { position: sticky; bottom: 0; display: flex; align-items: center;
+                  justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+                  padding: .8rem 1rem;
+                  background: color-mix(in srgb, var(--bg) 92%, transparent);
+                  backdrop-filter: blur(10px);
+                  border: 1px solid var(--line-2); }
+      .shelfbar[data-dirty='true'] { border-color: var(--accent); }
+      .shelfbar-state { color: var(--ink-3); text-transform: none; letter-spacing: .02em;
+                        font-size: .72rem; margin: 0; }
+      .shelfbar[data-dirty='true'] .shelfbar-state { color: var(--accent); }
+      .shelfbar-actions { display: flex; gap: .5rem; margin-left: auto; }
+      .shelfbar button[disabled] { opacity: .4; cursor: not-allowed; }
       .shelfpanel-hint { color: var(--ink-3); text-transform: none; letter-spacing: .02em;
                          font-size: .72rem; line-height: 1.8; margin: 0; }
       .shelfpanel-hint code { color: var(--accent); }
