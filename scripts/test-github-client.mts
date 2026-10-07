@@ -232,6 +232,54 @@ console.log('\n[4b] 过期 sha 的自动恢复（面板在 save 里做的那套�
   ok('失败时没有改动文件', store.get(p)?.content === '别人刚改过', store.get(p)?.content);
 }
 
+console.log('\n[4c] 并发保存的 sha 竞争（面板串行队列要解决的那个真问题）');
+// 真实事故：面板里每个输入框 onBlur 都会提交一次，连续改标题→年份→短评时
+// 多次保存并发跑、各自拿着同一个旧 sha，第二个开始必然 409
+// （用户看到的错误 "is at 475a2e3 but expected 127269a" 差的正好一个版本）。
+// 这里把两种做法都跑一遍，证明"为什么会坏"与"修法为什么有效"。
+{
+  const p = 'src/content/posts/2026-10-04-test.md';
+  store.set(p, { content: '初始', sha: 'sha-A' });
+
+  // (1) 并发写法：都拿同一个旧 sha → 只有第一个能成功
+  const [w1, w2, w3] = await Promise.all([
+    gh.writeFile(p, '改1', '并发1', TOKEN, 'sha-A'),
+    gh.writeFile(p, '改2', '并发2', TOKEN, 'sha-A'),
+    gh.writeFile(p, '改3', '并发3', TOKEN, 'sha-A'),
+  ]);
+  const okCount = [w1, w2, w3].filter((r) => r.ok).length;
+  ok('并发写同一个 sha：成功数恰好为 1（其余 409）', okCount === 1, `成功 ${okCount} 个`);
+  ok(
+    '失败的都是 409 且带 "does not match"',
+    [w1, w2, w3].filter((r) => !r.ok).every((r) => r.status === 409 && /does not match/.test(r.error ?? '')),
+    [w1, w2, w3].map((r) => `[${r.status}]${r.error}`).join(' | '),
+  );
+
+  // (2) 串行写法（面板现在的做法）：每次写前用最新的 sha → 全部成功
+  store.set(p, { content: '初始', sha: 'sha-B' });
+  let latest = 'sha-B';
+  const results: boolean[] = [];
+  for (const [body, msg] of [
+    ['改1', '串行1'],
+    ['改2', '串行2'],
+    ['改3', '串行3'],
+  ] as const) {
+    let r = await gh.writeFile(p, body, msg, TOKEN, latest);
+    // 与面板 persist 相同的恢复逻辑：409 就重取当前 sha 再写一次
+    if (!r.ok && r.status === 409) {
+      const fresh = await gh.readFile(p, TOKEN);
+      if (fresh.ok && fresh.data?.sha) r = await gh.writeFile(p, body, msg, TOKEN, fresh.data.sha);
+    }
+    if (r.ok) {
+      const after = await gh.readFile(p, TOKEN);
+      if (after.ok && after.data?.sha) latest = after.data.sha;
+    }
+    results.push(r.ok);
+  }
+  ok('串行写 + 每轮刷新 sha：三次全部成功', results.every(Boolean), results.join(','));
+  ok('最终内容是最后一次写入的值', store.get(p)?.content === '改3', store.get(p)?.content);
+}
+
 console.log('\n[5] 列目录（应只返回该目录下的文件）');
 const listed = await gh.listDir('src/content/posts', TOKEN);
 ok('列出文章目录', listed.ok && (listed.data?.length ?? 0) === 1, `count=${listed.data?.length}`);
