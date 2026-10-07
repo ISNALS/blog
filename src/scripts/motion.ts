@@ -90,6 +90,17 @@ export function initMotion(root: ParentNode = document) {
     inView(el, () => el.classList.add('is-in'), { margin: '0px 0px -18% 0px' });
   });
 
+  /* ── 4b. 板块分隔线：滚到这里才画出来（从中心向两边展开）────────────────
+     页面上原来只有"元素淡入"一种入场，而板块本身没有动作 ——
+     内容一少（比如现在只有三篇文章），整页在首屏就全部动完了，
+     滚动时就是一片静止。加这条线的意义不在于多一个效果，
+     而在于给"你刚刚进入了下一个板块"这件事一个明确的读数。
+     触发点比元素淡入稍早（-12%），这样线先画、内容再浮起，读起来像一次呼吸。 */
+  root.querySelectorAll<HTMLElement>('[data-rule]').forEach((el) => {
+    if (reduced) return el.classList.add('is-in');
+    inView(el, () => el.classList.add('is-in'), { margin: '0px 0px -12% 0px' });
+  });
+
   /* ── 5. 首屏刊头：一次"呼吸式放大"。这一处用自带终态的 keyframes（见 global.css），
      所以触发器一挂上就必然落到清晰帧，不存在被打断后停在模糊态的可能。 ── */
   root.querySelectorAll<HTMLElement>('[data-hero-title]').forEach((hero) => {

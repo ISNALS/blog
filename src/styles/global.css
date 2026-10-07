@@ -208,7 +208,20 @@ p {
   }
 }
 
-/* 列表卡片的成组入场：初始态同样交给 @starting-style，错峰由 JS 写 --delay */
+/* 列表卡片的成组入场：错峰延迟由 JS 写 --delay。
+ *
+ * **这里必须显式声明隐藏态，不能用 @starting-style**（我踩过，而且正是用户反馈的现象）。
+ * @starting-style 只在元素**第一次被渲染**时生效；而卡片是随首屏 HTML 一起渲染的，
+ * 那一刻它就已经"渲染过"了 —— 之后再挂 .is-in，浏览器不会回溯到起始态，
+ * 于是卡片从一开始就是完全可见的，"滚到才出现"根本不会发生。
+ * 所以隐藏态要真的写出来，靠 .is-in 把它解除。
+ *
+ * 为什么套一层 `html.js-anim`：CSS 不能自己判断"脚本会不会跑"。如果直接写死
+ * opacity: 0，而脚本因为任何原因没执行，结果就是**整页内容不可见**——这是最坏的
+ * 失败模式。所以由布局里一段同步脚本挂上 js-anim 这个"脚本活着"的标记：
+ *   · 脚本没跑（禁用/报错）→ 没有标记 → 卡片照常可见
+ *   · 脚本跑了 → 首帧就是隐藏态 → 滚到时才有东西浮起来
+ * 这个标记必须**在首次绘制之前**挂上（脚本放 head 里、不 defer），否则会闪一下。 */
 [data-group] > * {
   transition:
     opacity var(--dur-2) var(--ease-out),
@@ -216,15 +229,17 @@ p {
     transform var(--dur-3) var(--ease-out);
   transition-delay: var(--delay, 0ms);
 }
-@starting-style {
-  [data-group] > * {
-    opacity: 0;
-    filter: blur(14px);
-    transform: translateY(22px) scale(0.99);
-  }
+:where(html.js-anim) [data-group] > * {
+  opacity: 0;
+  filter: blur(14px);
+  transform: translateY(22px) scale(0.99);
+}
+:where(html.js-anim) [data-group] > *.is-in {
+  opacity: 1;
+  filter: blur(0);
+  transform: none;
 }
 
-/* 逐词揭示：标题与导语按词/字错峰（文章内的文字过渡） */
 [data-split] > .w {
   display: inline-block;
   transition:
@@ -269,6 +284,48 @@ p {
 }
 .hl.is-in {
   background-size: 100% 2px;
+}
+
+/* ── 画出来的分隔线 ─────────────────────────────────────────────────────────
+   给板块标题那条横线一个"滚到才画出来"的入场：从中心向两边展开。
+   为什么是这条而不是又给整块加一次淡入：板块级的淡入已经有了（[data-reveal]），
+   再加一层只是重复。而"线在画"这个动作**读起来像刊物在排版**——它同时说明了
+   两件事：这里是一个新板块的开始，以及你刚刚滚到了它。
+   用 transform: scaleX 而不是 background-size 或 width：合成器就能跑，
+   不触发布局（对比 .hl 那条用的是 background-size，因为它的线很细、代价可忽略）。
+
+   默认画的是"更深一点的线色"而不是强调色：强调色是留给真正要强调的东西的，
+   每个板块都描一遍锈橙就不叫强调了。需要时用 data-rule="accent"。
+   ------------------------------------------------------------------------ */
+[data-rule] {
+  position: relative;
+  padding-bottom: var(--rule-pad, 0.7rem);
+}
+[data-rule]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--line-2);
+  transform: scaleX(0);
+  transform-origin: 50% 50%;
+  transition: transform 1100ms var(--ease-out);
+  transition-delay: var(--rule-delay, 120ms);
+}
+[data-rule='accent']::after {
+  background: var(--accent);
+}
+[data-rule].is-in::after {
+  transform: scaleX(1);
+}
+/* 元素自带下边线时把它隐掉，只留画出来的那条（否则会重叠成 2px）。
+   刻意不用 !important：这条规则只该在"确实有静态边框"的元素上生效，
+   而且写在这里是为了让"为什么某处看不到边框"这件事有据可查。 */
+[data-rule].probe,
+[data-rule].month-list {
+  border-bottom: 0;
 }
 
 /* 页面级转场：Astro ClientRouter 的进出场都走同一套模糊+缩放 */
@@ -325,5 +382,10 @@ p {
   }
   .hl {
     background-size: 100% 2px !important;
+  }
+  /* 减动效时线直接就是画好的，不留"画到一半"的中间态 */
+  [data-rule]::after {
+    transition: none !important;
+    transform: scaleX(1) !important;
   }
 }

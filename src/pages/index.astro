@@ -84,7 +84,7 @@ const hasShelf = shelf.anime.length > 0 || shelf.music.length > 0;
   </section>
 
   <section class="feed" aria-labelledby="feed-title">
-    <header class="feed-head">
+    <header class="feed-head" data-rule>
       <h2 id="feed-title" class="feed-title" data-reveal data-delay-fixed style="--delay:0ms">
         最新<span class="accent">/</span>全部
       </h2>
@@ -118,7 +118,10 @@ const hasShelf = shelf.anime.length > 0 || shelf.music.length > 0;
   */}
   {hasShelf && (
     <section class="shelf" aria-labelledby="shelf-title">
-      <header class="shelf-head" data-reveal>
+      {/* 画出来的线放在标题上，而不是整个 section 上：
+          section 自带 border-top（和上一段的硬分隔），再给它一条画出来的下边线
+          会在同一个盒子上出现上下两种"分隔"，读起来乱。 */}
+      <header class="shelf-head" data-rule data-reveal>
         <h2 id="shelf-title" class="shelf-title">
           关于我<span class="accent">/</span>收藏
         </h2>
@@ -126,7 +129,7 @@ const hasShelf = shelf.anime.length > 0 || shelf.music.length > 0;
 
       {shelf.anime.length > 0 && (
         <div class="shelf-group">
-          <div class="shelf-group-head" data-reveal>
+          <div class="shelf-group-head" data-rule data-reveal>
             <h3 class="shelf-group-title">{shelf.animeTitle}</h3>
             {shelf.animeNote && <p class="shelf-note mono">{shelf.animeNote}</p>}
             <p class="shelf-count mono">{String(shelf.anime.length).padStart(2, '0')} 部</p>
@@ -160,7 +163,7 @@ const hasShelf = shelf.anime.length > 0 || shelf.music.length > 0;
 
       {shelf.music.length > 0 && (
         <div class="shelf-group">
-          <div class="shelf-group-head" data-reveal>
+          <div class="shelf-group-head" data-rule data-reveal>
             <h3 class="shelf-group-title">{shelf.musicTitle}</h3>
             {shelf.musicNote && <p class="shelf-note mono">{shelf.musicNote}</p>}
             <p class="shelf-count mono">{String(shelf.music.length).padStart(2, '0')} 首</p>
@@ -377,7 +380,6 @@ const hasShelf = shelf.anime.length > 0 || shelf.music.length > 0;
     align-items: baseline;
     justify-content: space-between;
     gap: 1rem;
-    border-bottom: 1px solid var(--line);
     padding-bottom: 1rem;
     margin-bottom: clamp(2rem, 5vw, 3.5rem);
   }
@@ -434,22 +436,27 @@ const hasShelf = shelf.anime.length > 0 || shelf.music.length > 0;
   }
   .shelf-title {
     font-size: var(--step-2);
-    margin: 0 0 clamp(2rem, 5vw, 3rem);
+    /* 下边距收窄：横线现在画在 .shelf-head 上，间距由它统一管 */
+    margin: 0;
   }
   .shelf-title .accent {
     color: var(--accent);
+  }
+  .shelf-head {
+    margin-bottom: clamp(2rem, 5vw, 3rem);
   }
 
   .shelf-group + .shelf-group {
     margin-top: clamp(3rem, 7vw, 5rem);
   }
 
+  /* 这里原来有一条静态下边线，现在交给 [data-rule] 的 ::after 画
+     （边框自己不会动，伪元素才能从中心展开）。padding-bottom 保留，给线腾位置。 */
   .shelf-group-head {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
     gap: 0.5rem 1rem;
-    border-bottom: 1px solid var(--line);
     padding-bottom: 0.8rem;
     margin-bottom: clamp(1.5rem, 4vw, 2.5rem);
   }

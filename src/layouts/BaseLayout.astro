@@ -64,6 +64,18 @@ const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {/*
+      在**首次绘制之前**挂上 js-anim 标记，告诉 CSS"脚本活着"。
+      只有挂上了，[data-group] > * 才会进入隐藏态、等滚到再浮起来
+      （原因见 global.css 里那段长注释：@starting-style 对"延迟激活"无效）。
+      必须是内联同步脚本、且放在 head：延迟一步就会先闪出一版可见内容。
+      尊重 prefers-reduced-motion —— 命中时不挂标记，页面直接是终态。
+    */}
+    <script is:inline>
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        document.documentElement.classList.add('js-anim');
+      }
+    </script>
     <title>{pageTitle}</title>
     <meta name="description" content={description} />
     {/* 不给索引的页面（后台）明确声明；同时关掉 follow，避免顺着链接爬到别处 */}

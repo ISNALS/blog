@@ -94,7 +94,9 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
     </div>
 
     <footer class="post-foot">
-      <div class="post-rule" aria-hidden="true"></div>
+      {/* 这条收尾线改成"滚到才画出来"：它是全文的句号，
+          静态横线和"画出来"的横线，读起来差别就在有没有那一下呼吸。 */}
+      <div class="post-rule" data-rule="accent" aria-hidden="true"></div>
       <p class="mono">
         写于 {fmtDate(pubDate)} · 全文 {minutes} 分钟 · 文中图片均由作者拍摄或截图
       </p>
@@ -219,9 +221,10 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
   .post-foot {
     margin-top: clamp(3rem, 8vw, 5rem);
   }
+  /* 线的本体由 [data-rule] 的 ::after 画，这里只负责占位与间距。
+     min-height 是必要的：伪元素是 absolute，盒子塌成 0 高就画不出来。 */
   .post-rule {
-    height: 1px;
-    background: var(--line);
+    min-height: 1px;
     margin-bottom: 1.2rem;
   }
 

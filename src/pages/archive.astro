@@ -53,7 +53,8 @@ const tags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]);
   {
     [...byMonth.entries()].map(([month, posts]) => (
       <section class="month">
-        <h2 class="month-label mono">{month}</h2>
+        {/* data-rule：每个月份的标题都会带着列表滚到视口时才"画出"那条线 */}
+        <h2 class="month-label mono" data-rule data-reveal>{month}</h2>
         <ol class="month-list">
           {posts.map((p, i) => (
             <li data-reveal style={`--delay:${Math.min(i * 35, 280)}ms;--rise:12px`}>
@@ -127,15 +128,18 @@ const tags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]);
     gap: 1rem;
     margin-bottom: clamp(2rem, 5vw, 3.5rem);
   }
+  /* 月份标题的横线交给 [data-rule] 画（滚到这个月才展开），
+     所以列表自己不再画上边线，避免出现两条相距 0 的线。
+     padding-bottom 给伪元素的线腾出位置。 */
   .month-label {
     margin: 0;
     color: var(--accent);
+    padding-bottom: 0.6rem;
   }
   .month-list {
     list-style: none;
     margin: 0;
     padding: 0;
-    border-top: 1px solid var(--line);
   }
   .month-list li {
     border-bottom: 1px solid var(--line);

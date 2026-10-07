@@ -19,7 +19,8 @@
     "test:probe": "node scripts/test-probe-with-server.mjs",
     "test:home": "node scripts/test-home-with-server.mjs",
     "test:shelf": "node scripts/test-shelf-ui.mjs",
-    "verify": "npm run check && npm test && npm run build && npm run check:links && npm run test:nav && npm run test:probe && npm run test:home && npm run test:shelf",
+    "test:scroll": "node scripts/test-scroll-with-server.mjs",
+    "verify": "npm run check && npm test && npm run build && npm run check:links && npm run test:nav && npm run test:probe && npm run test:home && npm run test:shelf && npm run test:scroll",
     "predeploy": "npm run verify && npm run check:config",
     "astro": "astro"
   },
