@@ -1,0 +1,30 @@
+{
+  "animeTitle": "看过的番",
+  "animeNote": "按看过的顺序，不是排名",
+  "anime": [
+    {
+      "title": "示例条目 · 点这里改",
+      "sub": "2024",
+      "cover": "",
+      "stars": 5,
+      "note": "这两条是占位数据，用来让你看到排版。在写作面板的「收藏」里改成你自己的。"
+    },
+    {
+      "title": "另一个示例",
+      "sub": "2021",
+      "cover": "",
+      "stars": 4,
+      "note": "封面可以留空（显示首字），也可以填外链图片。"
+    }
+  ],
+  "musicTitle": "在听的歌",
+  "musicNote": "占位音频，请换成你自己的",
+  "music": [
+    {
+      "title": "占位音 · 220Hz",
+      "artist": "替换成你的歌",
+      "src": "/blog/audio/placeholder-tone.mp3",
+      "cover": ""
+    }
+  ]
+}

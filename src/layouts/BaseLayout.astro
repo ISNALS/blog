@@ -9,7 +9,13 @@
  */
 import { ClientRouter } from 'astro:transitions';
 import { SITE, NAV, GITHUB } from '../consts';
+import { loadShelf } from '../lib/shelf';
 import '../styles/global.css';
+
+// 音乐清单在构建期读进来：播放器的曲目列表要是静态 HTML，
+// 否则 JS 一慢，悬浮窗会先空着再"长"出来。
+const shelf = loadShelf();
+const tracks = shelf.music;
 
 interface Props {
   title?: string;
@@ -115,6 +121,60 @@ const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
       <slot />
     </main>
 
+    {/*
+      悬浮音乐播放器。只在清单非空时渲染 —— 没歌的时候挂一个空壳在角落里
+      既占地方又让人疑惑。transition:persist 让换页时音频元素不被重建，
+      音乐才能跨页继续放（详见 src/scripts/player.ts）。
+    */}
+    {tracks.length > 0 && (
+      <div class="player" data-player data-tracks={JSON.stringify(tracks)} transition:persist>
+        <audio data-player-audio preload="metadata" loop={false}></audio>
+
+        <div class="player-main">
+          <div class="player-cover" data-player-cover hidden>
+            <img src="" alt="" loading="lazy" decoding="async" />
+          </div>
+          <div class="player-meta">
+            <p class="player-title" data-player-title>—</p>
+            <p class="player-artist" data-player-artist></p>
+            <p class="player-state" data-player-state></p>
+          </div>
+          <div class="player-btns">
+            <button type="button" data-player-prev aria-label="上一首">‹</button>
+            <button type="button" data-player-toggle aria-label="播放" class="player-play">
+              <span class="player-play-icon" aria-hidden="true"></span>
+            </button>
+            <button type="button" data-player-next aria-label="下一首">›</button>
+            <button
+              type="button"
+              data-player-list-toggle
+              aria-label="曲目列表"
+              aria-expanded="false">≡</button
+            >
+          </div>
+        </div>
+
+        <div class="player-extra" data-player-extra hidden>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            data-player-vol
+            aria-label="音量"
+          />
+          <ol class="player-list" data-player-list hidden>
+            {tracks.map((t) => (
+              <li data-player-item>
+                <span class="player-item-title">{t.title}</span>
+                {t.artist && <span class="player-item-artist">{t.artist}</span>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    )}
+
     <footer class="site-foot">
       <div class="shell foot-inner">
         <p class="mono">© {new Date().getFullYear()} {SITE.author} · {SITE.title}</p>
@@ -131,11 +191,13 @@ const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
     <script>
       import { initMotion } from '../scripts/motion';
       import { hydrateViews } from '../scripts/views';
+      import { initPlayer } from '../scripts/player';
 
-      // ClientRouter 换页后要重新初始化（两个函数都幂等，重复调用安全）
+      // ClientRouter 换页后要重新初始化（三个函数都幂等，重复调用安全）
       const boot = () => {
         initMotion(document);
         hydrateViews(document);
+        initPlayer(document);
       };
       boot();
       document.addEventListener('astro:page-load', boot);
@@ -293,6 +355,255 @@ const isCurrent = (href: string) => norm(href.replace(base, '')) === here;
         border-radius: 50%;
         background: var(--accent);
         opacity: 0.85;
+      }
+
+      /* ── 悬浮音乐播放器 ───────────────────────────────────────────────────
+         固定在右下角，暗底 + 细边，和站点的刊物气质一致（不做圆润的播放器皮肤）。
+         收起状态只有封面/曲名 + 播放键；展开才出现音量与曲目列表，
+         这样它平时"在场但不抢戏"。
+         ------------------------------------------------------------------ */
+      .player {
+        position: fixed;
+        right: clamp(0.75rem, 2vw, 1.5rem);
+        bottom: clamp(0.75rem, 2vw, 1.5rem);
+        z-index: 60;
+        width: min(22rem, calc(100vw - 1.5rem));
+        background: color-mix(in srgb, var(--bg) 88%, transparent);
+        backdrop-filter: blur(14px) saturate(1.1);
+        border: 1px solid var(--line-2);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+      }
+
+      .player-main {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.6rem 0.7rem;
+      }
+
+      .player-cover {
+        width: 2.6rem;
+        height: 2.6rem;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        flex: none;
+      }
+      .player-cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .player-meta {
+        min-width: 0;
+      }
+      .player-title {
+        margin: 0;
+        color: var(--ink);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .player-artist {
+        margin: 0.15rem 0 0;
+        color: var(--ink-3);
+        font-size: 0.66rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .player-state {
+        margin: 0.15rem 0 0;
+        color: var(--accent);
+        font-size: 0.64rem;
+        letter-spacing: 0.04em;
+      }
+      .player-state:empty {
+        display: none;
+      }
+
+      .player-btns {
+        display: flex;
+        align-items: center;
+        gap: 0.15rem;
+      }
+      .player-btns button {
+        width: 1.6rem;
+        height: 1.6rem;
+        display: grid;
+        place-items: center;
+        background: none;
+        border: 0;
+        color: var(--ink-2);
+        font-size: 0.95rem;
+        line-height: 1;
+        cursor: pointer;
+        transition: color var(--dur-1) var(--ease-out);
+      }
+      .player-btns button:hover {
+        color: var(--ink);
+      }
+
+      .player-play {
+        width: 2rem !important;
+        height: 2rem !important;
+        border: 1px solid var(--line-2) !important;
+        color: var(--ink) !important;
+      }
+      /* 播放/暂停图标用纯 CSS 画，少两个资源请求 */
+      .player-play-icon {
+        width: 0;
+        height: 0;
+        border-style: solid;
+        border-width: 5px 0 5px 8px;
+        border-color: transparent transparent transparent var(--ink);
+        margin-left: 2px;
+      }
+      .player[data-playing='true'] .player-play-icon {
+        width: 9px;
+        height: 10px;
+        border: 0;
+        margin-left: 0;
+        background:
+          linear-gradient(var(--ink), var(--ink)) 0 0 / 3px 100% no-repeat,
+          linear-gradient(var(--ink), var(--ink)) 6px 0 / 3px 100% no-repeat;
+      }
+
+      .player-extra {
+        border-top: 1px solid var(--line);
+        padding: 0.5rem 0.7rem 0.6rem;
+      }
+      .player-extra[hidden] {
+        display: none;
+      }
+
+      .player input[type='range'] {
+        width: 100%;
+        height: 2px;
+        appearance: none;
+        background: var(--line-2);
+        outline: none;
+      }
+      .player input[type='range']::-webkit-slider-thumb {
+        appearance: none;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+      }
+      .player input[type='range']::-moz-range-thumb {
+        width: 9px;
+        height: 9px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+      }
+
+      .player-list {
+        list-style: none;
+        margin: 0.6rem 0 0;
+        padding: 0;
+        max-height: 9rem;
+        overflow-y: auto;
+      }
+      .player-list[hidden] {
+        display: none;
+      }
+      .player-list li {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        padding: 0.3rem 0.2rem;
+        border-bottom: 1px solid var(--line);
+        color: var(--ink-2);
+        cursor: pointer;
+        transition: color var(--dur-1) var(--ease-out);
+      }
+      .player-list li:hover {
+        color: var(--ink);
+      }
+      .player-list li[aria-current='true'] {
+        color: var(--accent);
+      }
+      .player-item-title {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .player-item-artist {
+        margin-left: auto;
+        color: var(--ink-3);
+        font-size: 0.64rem;
+        white-space: nowrap;
+      }
+
+      /* 窄屏：别遮住正文，缩成一个只留播放键的小条 */
+      @media (max-width: 30rem) {
+        .player {
+          width: auto;
+          left: auto;
+        }
+        .player-main {
+          gap: 0.5rem;
+        }
+        .player-cover {
+          width: 2rem;
+          height: 2rem;
+        }
+      }
+
+      /* ── 鼠标指针美化（仅桌面端）─────────────────────────────────────────
+         自己画一个更粗、带黑边的箭头。两个必须踩准的点：
+         ① 热区：SVG 的 (1,1) 是箭尖，所以 pointer 必须写 `1 1`，
+            否则点击判定会偏出去十几像素，用户会觉得"点不准"。
+         ② 只在 `(hover: hover) and (pointer: fine)` 下生效 —— 触屏设备没有指针，
+            套上去只会白白多下载两个 data URI。
+         黑边用 stroke 画在外圈：这样在任何底色上都看得清（深色站点尤其需要）。
+         ------------------------------------------------------------------ */
+      @media (hover: hover) and (pointer: fine) {
+        body,
+        a,
+        button,
+        summary,
+        label,
+        input[type='range'],
+        [role='button'] {
+          cursor:
+            url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Cpath d='M4 2 L4 26 L10.5 20 L14.5 30 L19 28 L15 18.5 L23 18Z' fill='%23f2f0ec' stroke='%23000000' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E")
+              1 1,
+            auto;
+        }
+        input[type='text'],
+        input[type='email'],
+        input[type='search'],
+        textarea {
+          cursor: text;
+        }
+        button,
+        [role='button'],
+        a {
+          cursor:
+            url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Cpath d='M4 2 L4 26 L10.5 20 L14.5 30 L19 28 L15 18.5 L23 18Z' fill='%23d96f4a' stroke='%23000000' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E")
+              1 1,
+            pointer;
+        }
+      }
+      /* 无障碍：系统偏好减少动效时，指针也换回系统默认：
+         自定义指针在部分人眼里是干扰，这条策略和动效是一回事。 */
+      @media (prefers-reduced-motion: reduce) {
+        body,
+        a,
+        button,
+        summary,
+        label,
+        [role='button'] {
+          cursor: auto;
+        }
       }
     </style>
   </body>

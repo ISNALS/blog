@@ -24,13 +24,22 @@ import {
   listDir,
   listImages,
   readFile,
+  uploadAudio,
   uploadImage,
   verifyToken,
   writeFile,
   type TreeEntry,
 } from '@/lib/github';
+import {
+  EMPTY_SHELF,
+  SHELF_PATH,
+  normalizeShelf,
+  type Shelf,
+  type ShelfItem,
+  type Track,
+} from '@/lib/shelf';
 
-type View = 'list' | 'editor' | 'views';
+type View = 'list' | 'editor' | 'views' | 'shelf';
 
 /** 令牌与草稿状态的本地存储键。只存在这台浏览器，不进仓库、不发第三方。 */
 const TOKEN_KEY = 'blog:gh-token';
@@ -299,6 +308,9 @@ export default function Admin() {
           <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>
             文章
           </button>
+          <button className={view === 'shelf' ? 'on' : ''} onClick={() => setView('shelf')}>
+            收藏
+          </button>
           <button className={view === 'views' ? 'on' : ''} onClick={() => setView('views')}>
             热度
           </button>
@@ -317,6 +329,8 @@ export default function Admin() {
       </header>
 
       {busy && <div className="busy mono">{busy}</div>}
+
+      {view === 'shelf' && <ShelfPanel token={token} onToast={say} />}
 
       {view === 'list' && (
         <section className="list" data-group>
@@ -484,6 +498,208 @@ export default function Admin() {
 
 /* ── 热度面板 ─────────────────────────────────────────────────────────────── */
 
+/* ── 收藏清单（关于我：番剧 + 音乐）───────────────────────────────────────────
+   数据存在 public/shelf.json，通过 GitHub API 读写。这里刻意做成"改完立刻提交"，
+   而不是像文章编辑那样有草稿态——清单是小数据，没有草稿的必要，
+   即时保存的手感更好，也不会有"忘了点保存"的坑。
+   ------------------------------------------------------------------------- */
+function ShelfPanel({ token, onToast }: { token: string; onToast: (k: 'ok' | 'err', m: string) => void }) {
+  const [shelf, setShelf] = useState<Shelf>(EMPTY_SHELF);
+  const [sha, setSha] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await readFile(SHELF_PATH, token);
+    if (r.ok && r.data) {
+      try {
+        setShelf(normalizeShelf(JSON.parse(r.data.text)));
+      } catch {
+        onToast('err', 'shelf.json 解析失败，已用空清单打开（保存会覆盖它）');
+        setShelf(EMPTY_SHELF);
+      }
+      setSha(r.data.sha);
+    } else if (r.status === 404) {
+      setShelf(EMPTY_SHELF);
+      setSha(undefined);
+    } else {
+      onToast('err', `读取清单失败：${r.error}`);
+    }
+    setLoading(false);
+  }, [token, onToast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** 写回仓库。409 时重取 sha 再试一次（与文章保存同一套恢复逻辑） */
+  const persist = async (next: Shelf, label: string) => {
+    setSaving(label);
+    const body = `${JSON.stringify(next, null, 2)}\n`;
+    let r = await writeFile(SHELF_PATH, body, `shelf: ${label}`, token, sha);
+    if (!r.ok && r.status === 409) {
+      const fresh = await readFile(SHELF_PATH, token);
+      if (fresh.ok && fresh.data?.sha) {
+        r = await writeFile(SHELF_PATH, body, `shelf: ${label}`, token, fresh.data.sha);
+      }
+    }
+    setSaving(null);
+    if (!r.ok) return onToast('err', `保存失败：${r.error}`);
+    const fresh = await readFile(SHELF_PATH, token);
+    if (fresh.ok) setSha(fresh.data?.sha);
+    setShelf(next);
+    onToast('ok', `已保存 · ${label}（站点约 1 分钟后更新）`);
+  };
+
+  const addAnime = () =>
+    persist({ ...shelf, anime: [...shelf.anime, { title: '新番剧', stars: 4 }] }, '新增番剧');
+
+  const addTrack = () =>
+    persist({ ...shelf, music: [...shelf.music, { title: '新歌', src: '' }] }, '新增曲目');
+
+  const patchAnime = (i: number, patch: Partial<ShelfItem>) =>
+    setShelf((s) => ({ ...s, anime: s.anime.map((a, j) => (j === i ? { ...a, ...patch } : a)) }));
+
+  const patchTrack = (i: number, patch: Partial<Track>) =>
+    setShelf((s) => ({ ...s, music: s.music.map((t, j) => (j === i ? { ...t, ...patch } : t)) }));
+
+  const onUploadCover = async (i: number, file: File) => {
+    setSaving('上传封面…');
+    const r = await uploadImage(file, token, undefined, import.meta.env.BASE_URL);
+    setSaving(null);
+    if (!r.ok || !r.data) return onToast('err', `封面上传失败：${r.error}`);
+    const next = { ...shelf, anime: shelf.anime.map((a, j) => (j === i ? { ...a, cover: r.data!.url } : a)) };
+    await persist(next, '换封面');
+  };
+
+  const onUploadAudio = async (i: number, file: File) => {
+    setSaving('上传音频…');
+    const r = await uploadAudio(file, token, (p) => setSaving(`上传音频… ${p}%`), import.meta.env.BASE_URL);
+    setSaving(null);
+    if (!r.ok || !r.data) return onToast('err', `音频上传失败：${r.error}`);
+    const next = {
+      ...shelf,
+      music: shelf.music.map((t, j) => (j === i ? { ...t, src: r.data!.url, title: t.title === '新歌' ? file.name.replace(/\.[^.]+$/, '') : t.title } : t)),
+    };
+    await persist(next, '换音频');
+  };
+
+  if (loading) return <p className="none">读取收藏清单…</p>;
+
+  return (
+    <section className="shelfpanel">
+      <p className="mono shelfpanel-hint">
+        清单放在仓库的 <code>{SHELF_PATH}</code>。改完立刻提交，站点约 1 分钟后更新。
+        番剧封面可以直接填外链（Bangumi / AniList 的图），比上传更省仓库体积。
+      </p>
+
+      {/* ── 番剧 ── */}
+      <div className="shelfpanel-group">
+        <div className="shelfpanel-head">
+          <input
+            className="mono titleinput"
+            value={shelf.animeTitle}
+            onChange={(e) => setShelf((s) => ({ ...s, animeTitle: e.target.value }))}
+            onBlur={() => persist(shelf, '改番剧标题')}
+          />
+          <input
+            className="mono noteinput"
+            placeholder="一句说明（可留空）"
+            value={shelf.animeNote}
+            onChange={(e) => setShelf((s) => ({ ...s, animeNote: e.target.value }))}
+            onBlur={() => persist(shelf, '改番剧说明')}
+          />
+          <button className="ghost" onClick={addAnime}>
+            ＋ 加一部
+          </button>
+        </div>
+
+        {shelf.anime.map((a, i) => (
+          <div className="shelfrow" key={`a${i}`}>
+            <div className="shelfrow-cover">
+              {a.cover ? <img src={a.cover} alt="" /> : <span className="mono">无图</span>}
+            </div>
+            <div className="shelfrow-fields">
+              <input value={a.title} placeholder="标题" onChange={(e) => patchAnime(i, { title: e.target.value })} onBlur={() => persist(shelf, '改番剧')} />
+              <input value={a.sub ?? ''} placeholder="年份 / 补充" onChange={(e) => patchAnime(i, { sub: e.target.value })} onBlur={() => persist(shelf, '改番剧')} />
+              <input value={a.cover ?? ''} placeholder="封面 URL（可外链）" onChange={(e) => patchAnime(i, { cover: e.target.value })} onBlur={() => persist(shelf, '改封面')} />
+              <input value={a.note ?? ''} placeholder="短评（可留空）" onChange={(e) => patchAnime(i, { note: e.target.value })} onBlur={() => persist(shelf, '改短评')} />
+            </div>
+            <div className="shelfrow-side">
+              <select value={a.stars ?? 0} onChange={(e) => persist({ ...shelf, anime: shelf.anime.map((x, j) => (j === i ? { ...x, stars: Number(e.target.value) || undefined } : x)) }, '改评分')}>
+                <option value={0}>未评分</option>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>{'★'.repeat(n)}</option>
+                ))}
+              </select>
+              <label className="ghost filebtn">
+                换封面
+                <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUploadCover(i, f); e.target.value = ''; }} />
+              </label>
+              <button className="ghost danger" onClick={() => persist({ ...shelf, anime: shelf.anime.filter((_, j) => j !== i) }, '删番剧')}>
+                删除
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── 音乐 ── */}
+      <div className="shelfpanel-group">
+        <div className="shelfpanel-head">
+          <input
+            className="mono titleinput"
+            value={shelf.musicTitle}
+            onChange={(e) => setShelf((s) => ({ ...s, musicTitle: e.target.value }))}
+            onBlur={() => persist(shelf, '改音乐标题')}
+          />
+          <input
+            className="mono noteinput"
+            placeholder="一句说明（可留空）"
+            value={shelf.musicNote}
+            onChange={(e) => setShelf((s) => ({ ...s, musicNote: e.target.value }))}
+            onBlur={() => persist(shelf, '改音乐说明')}
+          />
+          <button className="ghost" onClick={addTrack}>
+            ＋ 加一首
+          </button>
+        </div>
+
+        <p className="mono shelfpanel-warn">
+          音频走 Git Data API 上传，单文件上限 24 MB。请只放你有权公开的音乐 ——
+          仓库是公开的，上传等于公开发布。
+        </p>
+
+        {shelf.music.map((t, i) => (
+          <div className="shelfrow" key={`m${i}`}>
+            <div className="shelfrow-cover">
+              {t.cover ? <img src={t.cover} alt="" /> : <span className="mono">♪</span>}
+            </div>
+            <div className="shelfrow-fields">
+              <input value={t.title} placeholder="曲名" onChange={(e) => patchTrack(i, { title: e.target.value })} onBlur={() => persist(shelf, '改曲目')} />
+              <input value={t.artist ?? ''} placeholder="艺术家" onChange={(e) => patchTrack(i, { artist: e.target.value })} onBlur={() => persist(shelf, '改曲目')} />
+              <input value={t.src} placeholder="音频地址（可外链，或点右边上传）" onChange={(e) => patchTrack(i, { src: e.target.value })} onBlur={() => persist(shelf, '改音频地址')} />
+              <input value={t.cover ?? ''} placeholder="封面 URL（可留空）" onChange={(e) => patchTrack(i, { cover: e.target.value })} onBlur={() => persist(shelf, '改封面')} />
+            </div>
+            <div className="shelfrow-side">
+              <label className="ghost filebtn">
+                上传音频
+                <input type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUploadAudio(i, f); e.target.value = ''; }} />
+              </label>
+              <button className="ghost danger" onClick={() => persist({ ...shelf, music: shelf.music.filter((_, j) => j !== i) }, '删曲目')}>
+                删除
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {saving && <div className="busy mono">{saving}</div>}
+    </section>
+  );
+}
+
 function ViewsPanel({ posts, token }: { posts: TreeEntry[]; token: string }) {
   const [data, setData] = useState<Record<string, number | null>>({});
   const [loading, setLoading] = useState(false);
@@ -650,8 +866,44 @@ function AdminStyles() {
                           transition: transform var(--dur-2) var(--ease-out); }
       .imgpick-grid button:hover img { transform: scale(1.08); }
 
-      .views-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-      .views-note { color: var(--ink-3); text-transform: none; letter-spacing: .02em; margin: 0; }
+      /* ── 收藏清单面板 ─────────────────────────────────────────────────────
+         一行一条，左侧封面缩略图、中间输入框、右侧操作。
+         输入框用 onBlur 触发保存，所以视觉上要能看出"这是一行可编辑的数据"
+         而不是一个表单——所以保持极简边框，焦点时才亮。 */
+      .shelfpanel { display: grid; gap: 2.5rem; }
+      .shelfpanel-hint { color: var(--ink-3); text-transform: none; letter-spacing: .02em;
+                         font-size: .72rem; line-height: 1.8; margin: 0; }
+      .shelfpanel-hint code { color: var(--accent); }
+      .shelfpanel-warn { color: var(--ink-3); text-transform: none; letter-spacing: .02em;
+                         font-size: .7rem; line-height: 1.7; margin: 0 0 .5rem;
+                         border-left: 2px solid var(--accent); padding-left: .7rem; }
+      .shelfpanel-group { display: grid; gap: .75rem; }
+      .shelfpanel-head { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center;
+                         border-bottom: 1px solid var(--line); padding-bottom: .75rem; }
+      .shelfpanel-head .titleinput { flex: 0 1 12rem; font-family: var(--serif); font-size: 1.02rem; }
+      .shelfpanel-head .noteinput { flex: 1 1 10rem; }
+
+      .shelfrow { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) auto;
+                  gap: .75rem; align-items: start; padding: .7rem 0;
+                  border-bottom: 1px solid var(--line); }
+      .shelfrow-cover { aspect-ratio: 2 / 3; border: 1px solid var(--line); overflow: hidden;
+                        display: grid; place-items: center; background: var(--line);
+                        color: var(--ink-3); font-size: .6rem; }
+      .shelfrow-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .shelfrow-fields { display: grid; gap: .35rem; min-width: 0; }
+      .shelfrow-side { display: flex; flex-direction: column; gap: .3rem; align-items: stretch; }
+      .shelfrow-side select { font-family: var(--mono); font-size: .7rem; background: var(--bg);
+                              color: var(--ink); border: 1px solid var(--line-2); padding: .3rem; }
+      .filebtn { text-align: center; cursor: pointer; }
+      .danger { color: #d9736a !important; }
+      .danger:hover { color: #ff8b80 !important; }
+
+      @media (max-width: 40rem) {
+        .shelfrow { grid-template-columns: 2.6rem minmax(0, 1fr); }
+        .shelfrow-side { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
+      }
+
+      .views-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }      .views-note { color: var(--ink-3); text-transform: none; letter-spacing: .02em; margin: 0; }
       .stat { display: grid; gap: .3rem; }
       .stat-label { font-family: var(--mono); font-size: .68rem; letter-spacing: .08em;
                     text-transform: uppercase; color: var(--ink-3); }

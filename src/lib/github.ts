@@ -192,6 +192,126 @@ const safeImageName = (name: string) => {
  *  这里留一点余量：base64 会把体积放大约 1/3，所以按原始字节数卡在 950KB 更稳。 */
 const SIZE_LIMIT = 950 * 1024;
 
+/** 音频走 Git Data API，单文件上限 100 MB；这里卡在 24 MB —— 再大的文件
+ *  对阅读型的个人站点来说只是负担（访客要等它下载），不如让他先压一下。 */
+const AUDIO_LIMIT = 24 * 1024 * 1024;
+
+/** 把 Uint8Array 转成紧凑的 base64（不能用 btoa 直接处理二进制） */
+const bytesToBase64 = (buf: Uint8Array) => {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+};
+
+/**
+ * 用 **Git Data API** 上传二进制文件（音频用这条通道）。
+ *
+ * 为什么不能用 Contents API：它单文件上限 1 MB，一首 MP3 至少 3–8 MB，必然失败。
+ * Git Data API 的三步是 GitHub 的官方做法：
+ *   1. `POST /git/blobs`      —— 上传内容，拿到 blob sha
+ *   2. `POST /git/trees`      —— 基于当前 tree 造一棵新 tree，把 blob 挂到指定路径
+ *   3. `POST /git/commits`    —— 用新 tree 造一个提交（父提交 = 当前 HEAD）
+ *   4. `PATCH /git/refs/heads/<branch>` —— 把分支挪到新提交
+ *
+ * 代价是**没有原子性**：中间任一步失败，前面已创建的 blob/tree 会变成悬空对象
+ * （GitHub 会回收，不影响仓库可用性）。所以错误信息要带上"哪一步失败"。
+ */
+export async function uploadViaGitData(
+  bytes: Uint8Array,
+  repoPathInRepo: string,
+  message: string,
+  token: string,
+): Promise<ApiResult<{ path: string; commit: string }>> {
+  // 1) blob
+  const blob = await req<{ sha: string }>(`${repoPath()}/git/blobs`, token, {
+    method: 'POST',
+    body: JSON.stringify({ content: bytesToBase64(bytes), encoding: 'base64' }),
+  });
+  if (!blob.ok || !blob.data?.sha) {
+    return { ok: false, status: blob.status, error: `上传内容失败 · ${blob.error ?? ''}` };
+  }
+
+  // 取当前分支指向的提交，作为父提交与基准 tree
+  const head = await req<{ object: { sha: string } }>(`${repoPath()}/git/ref/heads/${GITHUB.branch}`, token);
+  if (!head.ok || !head.data?.object?.sha) {
+    return { ok: false, status: head.status, error: `读取分支失败 · ${head.error ?? ''}` };
+  }
+  const parent = head.data.object.sha;
+
+  const parentCommit = await req<{ tree: { sha: string } }>(`${repoPath()}/git/commits/${parent}`, token);
+  if (!parentCommit.ok || !parentCommit.data?.tree?.sha) {
+    return { ok: false, status: parentCommit.status, error: `读取父提交失败 · ${parentCommit.error ?? ''}` };
+  }
+
+  // 2) tree
+  const tree = await req<{ sha: string }>(`${repoPath()}/git/trees`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      base_tree: parentCommit.data.tree.sha,
+      tree: [{ path: repoPathInRepo, mode: '100644', type: 'blob', sha: blob.data.sha }],
+    }),
+  });
+  if (!tree.ok || !tree.data?.sha) {
+    return { ok: false, status: tree.status, error: `创建 tree 失败 · ${tree.error ?? ''}` };
+  }
+
+  // 3) commit
+  const commit = await req<{ sha: string }>(`${repoPath()}/git/commits`, token, {
+    method: 'POST',
+    body: JSON.stringify({ message, tree: tree.data.sha, parents: [parent] }),
+  });
+  if (!commit.ok || !commit.data?.sha) {
+    return { ok: false, status: commit.status, error: `创建提交失败 · ${commit.error ?? ''}` };
+  }
+
+  // 4) 移动分支
+  const ref = await req<unknown>(`${repoPath()}/git/refs/heads/${GITHUB.branch}`, token, {
+    method: 'PATCH',
+    body: JSON.stringify({ sha: commit.data.sha, force: false }),
+  });
+  if (!ref.ok) {
+    return { ok: false, status: ref.status, error: `更新分支失败 · ${ref.error ?? ''}` };
+  }
+
+  return { ok: true, status: 200, data: { path: repoPathInRepo, commit: commit.data.sha } };
+}
+
+/** 上传音频：路径固定在 public/audio 下，走 Git Data API（可传大文件）。
+ *  同名文件直接覆盖为新提交 —— 音频没有"更新必须带 sha"的限制，因为
+ *  每一次都是一棵新 tree、一个新提交，不存在 sha 冲突。 */
+export async function uploadAudio(
+  file: File,
+  token: string,
+  onProgress?: (pct: number) => void,
+  baseUrl?: string,
+): Promise<ApiResult<{ path: string; url: string }>> {
+  if (file.size > AUDIO_LIMIT) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    return {
+      ok: false,
+      status: 413,
+      error:
+        `音频 ${mb} MB，超过 ${Math.round(AUDIO_LIMIT / 1024 / 1024)} MB 上限。` +
+        `建议先用 128kbps 的 MP3 或 Opus 重新导出一遍（一首歌通常能压到 3–5 MB），` +
+        `毕竟访客要把它下载下来才能听。`,
+    };
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  onProgress?.(50);
+  const safe = safeImageName(file.name);
+  const path = `${GITHUB.audioDir}/${safe}`;
+  const r = await uploadViaGitData(bytes, path, `audio: ${path}`, token);
+  if (!r.ok) return { ok: false, status: r.status, error: r.error };
+  onProgress?.(100);
+  const base = (baseUrl ?? import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
+  return { ok: true, status: 200, data: { path, url: `${base}/audio/${safe}` } };
+}
+
+
 /** 上传图片：二进制走 base64，路径固定在 public/images 下 */
 export async function uploadImage(
   file: File,

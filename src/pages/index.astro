@@ -10,6 +10,7 @@ import { getCollection } from 'astro:content';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import PostCard from '../components/PostCard.astro';
 import { SITE } from '../consts';
+import { loadShelf } from '../lib/shelf';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -18,6 +19,11 @@ const all = (await getCollection('posts', ({ data }) => import.meta.env.PROD ? !
 
 const total = all.length;
 const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
+
+// 「关于我」的收藏清单（番剧 + 音乐）。数据在 public/shelf.json，构建期读入，
+// 所以列表是静态 HTML。清单为空时整段不渲染。
+const shelf = loadShelf();
+const hasShelf = shelf.anime.length > 0 || shelf.music.length > 0;
 ---
 
 <BaseLayout compact>
@@ -104,6 +110,83 @@ const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
       )
     }
   </section>
+
+  {/*
+    「关于我」的收藏栏。刻意放在文章列表**之后**：访客先看到内容，
+    再看到这个人读什么听什么——反过来会像一份简历。
+    封面统一 2:3 竖版（番剧封面与专辑封面的自然比例），用 object-fit 裁切对齐。
+  */}
+  {hasShelf && (
+    <section class="shelf" aria-labelledby="shelf-title">
+      <header class="shelf-head" data-reveal>
+        <h2 id="shelf-title" class="shelf-title">
+          关于我<span class="accent">/</span>收藏
+        </h2>
+      </header>
+
+      {shelf.anime.length > 0 && (
+        <div class="shelf-group">
+          <div class="shelf-group-head" data-reveal>
+            <h3 class="shelf-group-title">{shelf.animeTitle}</h3>
+            {shelf.animeNote && <p class="shelf-note mono">{shelf.animeNote}</p>}
+            <p class="shelf-count mono">{String(shelf.anime.length).padStart(2, '0')} 部</p>
+          </div>
+          <ul class="shelf-grid" data-group>
+            {shelf.anime.map((a) => (
+              <li class="shelf-card">
+                <div class="shelf-cover" data-img-reveal>
+                  {a.cover ? (
+                    <img src={a.cover} alt="" loading="lazy" decoding="async" />
+                  ) : (
+                    <span class="shelf-cover-fallback" aria-hidden="true">
+                      {a.title.slice(0, 1)}
+                    </span>
+                  )}
+                </div>
+                <p class="shelf-item-title">{a.title}</p>
+                {a.sub && <p class="shelf-item-sub mono">{a.sub}</p>}
+                {a.stars && (
+                  <p class="shelf-stars" aria-label={`${a.stars} 分`}>
+                    {'★'.repeat(a.stars)}
+                    <span class="shelf-stars-off">{'★'.repeat(5 - a.stars)}</span>
+                  </p>
+                )}
+                {a.note && <p class="shelf-item-note">{a.note}</p>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {shelf.music.length > 0 && (
+        <div class="shelf-group">
+          <div class="shelf-group-head" data-reveal>
+            <h3 class="shelf-group-title">{shelf.musicTitle}</h3>
+            {shelf.musicNote && <p class="shelf-note mono">{shelf.musicNote}</p>}
+            <p class="shelf-count mono">{String(shelf.music.length).padStart(2, '0')} 首</p>
+          </div>
+          <ul class="shelf-grid is-music" data-group>
+            {shelf.music.map((m) => (
+              <li class="shelf-card">
+                <div class="shelf-cover" data-img-reveal>
+                  {m.cover ? (
+                    <img src={m.cover} alt="" loading="lazy" decoding="async" />
+                  ) : (
+                    <span class="shelf-cover-fallback" aria-hidden="true">
+                      ♪
+                    </span>
+                  )}
+                </div>
+                <p class="shelf-item-title">{m.title}</p>
+                {m.artist && <p class="shelf-item-sub mono">{m.artist}</p>}
+              </li>
+            ))}
+          </ul>
+          <p class="shelf-foot mono">右下角的播放器可以听 ↑</p>
+        </div>
+      )}
+    </section>
+  )}
 </BaseLayout>
 
 <script>
@@ -341,5 +424,118 @@ const tagsTop = [...new Set(all.flatMap((p) => p.data.tags))].slice(0, 6);
   .empty-hint a {
     color: var(--accent);
     border-bottom: 1px solid currentColor;
+  }
+
+  /* ── 「关于我」收藏栏 ─────────────────────────────────────────────────── */
+  .shelf {
+    margin-top: clamp(4rem, 10vw, 8rem);
+    border-top: 1px solid var(--line);
+    padding-top: clamp(2rem, 5vw, 3rem);
+  }
+  .shelf-title {
+    font-size: var(--step-2);
+    margin: 0 0 clamp(2rem, 5vw, 3rem);
+  }
+  .shelf-title .accent {
+    color: var(--accent);
+  }
+
+  .shelf-group + .shelf-group {
+    margin-top: clamp(3rem, 7vw, 5rem);
+  }
+
+  .shelf-group-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.8rem;
+    margin-bottom: clamp(1.5rem, 4vw, 2.5rem);
+  }
+  .shelf-group-title {
+    font-size: var(--step-1);
+    margin: 0;
+  }
+  .shelf-note {
+    margin: 0;
+    color: var(--ink-3);
+    font-size: 0.7rem;
+  }
+  .shelf-count {
+    margin: 0 0 0 auto;
+    color: var(--ink-3);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .shelf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+    gap: clamp(1.25rem, 3vw, 2rem);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .shelf-grid.is-music {
+    grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  }
+
+  .shelf-card {
+    min-width: 0;
+  }
+  .shelf-cover {
+    aspect-ratio: 2 / 3;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: var(--line);
+    margin-bottom: 0.6rem;
+  }
+  .shelf-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .shelf-cover-fallback {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    font-family: var(--serif);
+    font-size: var(--step-3);
+    color: var(--ink-3);
+  }
+
+  .shelf-item-title {
+    margin: 0;
+    font-size: 0.86rem;
+    color: var(--ink);
+    line-height: 1.4;
+  }
+  .shelf-item-sub {
+    margin: 0.2rem 0 0;
+    color: var(--ink-3);
+    font-size: 0.64rem;
+  }
+  .shelf-stars {
+    margin: 0.25rem 0 0;
+    color: var(--accent);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+  }
+  .shelf-stars-off {
+    color: var(--line-2);
+  }
+  .shelf-item-note {
+    margin: 0.3rem 0 0;
+    color: var(--ink-2);
+    font-size: 0.72rem;
+    line-height: 1.6;
+  }
+  .shelf-foot {
+    margin: clamp(1.5rem, 4vw, 2rem) 0 0;
+    color: var(--ink-3);
+    font-size: 0.68rem;
   }
 </style>

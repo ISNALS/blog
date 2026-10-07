@@ -30,9 +30,11 @@ export const GITHUB = {
   repo: 'blog',
   /** 发布分支 */
   branch: 'main',
-  /** 文章与图片所在的目录（Admin 面板只读写这两个目录） */
+  /** 文章与图片所在的目录（Admin 面板读写） */
   postsDir: 'src/content/posts',
   imagesDir: 'public/images',
+  /** 音频目录（走 Git Data API 上传，单文件上限 24 MB，见 lib/github.ts） */
+  audioDir: 'public/audio',
 } as const;
 
 /** 阅读量计数：Abacus（免费、开源、无需后端）。
