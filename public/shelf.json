@@ -4,14 +4,14 @@
   "anime": [
     {
       "title": "我的裘可妹妹",
-      "sub": "2024",
+      "sub": "2006",
       "cover": "https://lain.bgm.tv/r/400/pic/cover/l/1e/e9/6414_4j440.jpg",
       "stars": 3,
       "note": "抛开剧情不谈，其实在早期还是挺不错的日常番了"
     },
     {
-      "title": "另一个示例",
-      "sub": "2021",
+      "title": "搞姬日常",
+      "sub": "2011",
       "cover": "https://lain.bgm.tv/pic/cover/l/3a/79/68235_h6xFb.jpg?_gl=1*1tqvl97*_ga*Nzc1NDg1OTYyLjE3OTEzNTk3MjY.*_ga_1109JLGMHN*czE3OTEzNTk3MjUkbzEkZzEkdDE3OTEzNjA1ODgkajM1JGwwJGgw",
       "stars": 4,
       "note": "封面可以留空（显示首字），也可以填外链图片。"
